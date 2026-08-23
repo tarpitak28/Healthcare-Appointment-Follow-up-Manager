@@ -1,0 +1,100 @@
+datasource db {
+	provider = "postgresql"
+	url      = env("DATABASE_URL")
+}
+
+generator client {
+	provider = "prisma-client-js"
+}
+
+enum Role {
+	ADMIN
+	DOCTOR
+	PATIENT
+}
+
+enum AppointmentStatus {
+	BOOKED
+	COMPLETED
+	CANCELLED
+}
+
+enum UrgencyLevel {
+	LOW
+	MEDIUM
+	HIGH
+}
+
+model User {
+	id                      String         @id @default(uuid())
+	name                    String
+	email                   String         @unique
+	password                String
+	role                    Role           @default(PATIENT)
+	createdAt               DateTime       @default(now())
+	updatedAt               DateTime       @updatedAt
+
+	doctorProfile           DoctorProfile?
+	appointmentsAsPatient  Appointment[]  @relation("PatientAppointments")
+	googleToken             GoogleToken?
+}
+
+model DoctorProfile {
+	id             String         @id @default(uuid())
+	userId         String         @unique
+	user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+	specialisation String
+	slotDuration   Int            @default(30)
+	workingHours   Json
+
+	appointments   Appointment[]
+	leaveDays      DoctorLeave[]
+}
+
+model DoctorLeave {
+	id              String        @id @default(uuid())
+	doctorProfileId String
+	doctorProfile   DoctorProfile @relation(fields: [doctorProfileId], references: [id], onDelete: Cascade)
+	date            DateTime      @db.Date
+	reason          String?
+	createdAt       DateTime      @default(now())
+}
+
+model Appointment {
+	id                String            @id @default(uuid())
+	patientId         String
+	patient           User              @relation("PatientAppointments", fields: [patientId], references: [id])
+	doctorProfileId   String
+	doctorProfile     DoctorProfile     @relation(fields: [doctorProfileId], references: [id])
+
+	appointmentDate   DateTime          @db.Date
+	startTime         String
+	endTime           String
+	status            AppointmentStatus @default(BOOKED)
+
+	symptoms          String
+	urgencyLevel      UrgencyLevel?
+	chiefComplaint    String?
+	suggestedQuestions Json?
+
+	clinicalNotes     String?
+	postVisitSummary  String?
+	prescription      Json?
+
+	calendarEventId   String?
+	createdAt         DateTime          @default(now())
+	updatedAt         DateTime          @updatedAt
+
+	@@index([doctorProfileId, appointmentDate, startTime])
+}
+
+model GoogleToken {
+	id           String   @id @default(uuid())
+	userId       String   @unique
+	user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+	accessToken  String
+	refreshToken String
+	expiresAt    DateTime
+	createdAt    DateTime @default(now())
+	updatedAt    DateTime @updatedAt
+}
