@@ -338,29 +338,80 @@ async function deleteAccount(req, res) {
 			const doctorProf = await tx.doctorProfile.findUnique({
 				where: { userId },
 			});
+			const doctorProfileId = doctorProf?.id;
 
-			// 2. Delete medication reminders connected to patient appointments
+			// 2. Find all appointment IDs linked to this patient or doctor
+			const appointments = await tx.appointment.findMany({
+				where: {
+					OR: [
+						{ patientId: userId },
+						...(doctorProfileId ? [{ doctorProfileId }] : []),
+					],
+				},
+				select: { id: true },
+			});
+			const appointmentIds = appointments.map((a) => a.id);
+
+			// 3. Delete NotificationLogs linked to user OR these appointments
+			await tx.notificationLog.deleteMany({
+				where: {
+					OR: [
+						{ recipientUserId: userId },
+						...(appointmentIds.length > 0 ? [{ appointmentId: { in: appointmentIds } }] : []),
+					],
+				},
+			});
+
+			// 4. Delete MedicationReminders linked to user OR these appointments
 			await tx.medicationReminder.deleteMany({
 				where: {
 					OR: [
 						{ patientId: userId },
-						{ appointment: { patientId: userId } },
-						...(doctorProf ? [{ appointment: { doctorProfileId: doctorProf.id } }] : []),
+						...(appointmentIds.length > 0 ? [{ appointmentId: { in: appointmentIds } }] : []),
 					],
 				},
 			});
 
-			// 3. Delete appointments associated with patientId or doctorProfileId
-			await tx.appointment.deleteMany({
+			// 5. Delete BroadcastRecipients for this user
+			await tx.broadcastRecipient.deleteMany({
+				where: { userId },
+			});
+
+			// 6. Delete SlotHolds for this user or doctor
+			await tx.slotHold.deleteMany({
 				where: {
 					OR: [
 						{ patientId: userId },
-						...(doctorProf ? [{ doctorProfileId: doctorProf.id }] : []),
+						...(doctorProfileId ? [{ doctorProfileId }] : []),
 					],
 				},
 			});
 
-			// 4. Delete user record (cascades to DoctorProfile, GoogleToken, SlotHold, NotificationLog, BroadcastRecipient)
+			// 7. Delete Appointments
+			if (appointmentIds.length > 0) {
+				await tx.appointment.deleteMany({
+					where: {
+						id: { in: appointmentIds },
+					},
+				});
+			}
+
+			// 8. Delete DoctorLeaves & DoctorProfile if doctor
+			if (doctorProfileId) {
+				await tx.doctorLeave.deleteMany({
+					where: { doctorProfileId },
+				});
+				await tx.doctorProfile.delete({
+					where: { id: doctorProfileId },
+				});
+			}
+
+			// 9. Delete GoogleToken
+			await tx.googleToken.deleteMany({
+				where: { userId },
+			});
+
+			// 10. Delete User record
 			await tx.user.delete({
 				where: { id: userId },
 			});
@@ -374,7 +425,7 @@ async function deleteAccount(req, res) {
 		console.error('Delete account error:', error);
 		res.status(500).json({
 			success: false,
-			message: 'Server error while deleting account data',
+			message: error.message || 'Server error while deleting account data',
 		});
 	}
 }
