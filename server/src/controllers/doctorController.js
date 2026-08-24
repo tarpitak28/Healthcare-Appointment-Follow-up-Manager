@@ -1,5 +1,7 @@
 const prisma = require('../config/db');
 const { generatePostVisitSummary } = require('../services/llmService');
+const { sendEmail } = require('../utils/emailService');
+const { deleteCalendarEvent } = require('../services/calendarService');
 
 // Get doctor's appointments
 async function getDoctorAppointments(req, res) {
@@ -88,7 +90,93 @@ async function submitPostVisitNotes(req, res) {
 	}
 }
 
+async function cancelDoctorAppointment(req, res) {
+	try {
+		const { appointmentId } = req.params;
+		const userId = req.user.id;
+
+		const doctorProfile = await prisma.doctorProfile.findUnique({
+			where: { userId },
+		});
+
+		if (!doctorProfile) {
+			return res.status(404).json({
+				success: false,
+				message: 'Doctor profile not found.',
+			});
+		}
+
+		const appointment = await prisma.appointment.findUnique({
+			where: { id: appointmentId },
+			include: {
+				patient: true,
+			},
+		});
+
+		if (!appointment) {
+			return res.status(404).json({
+				success: false,
+				message: 'Appointment not found.',
+			});
+		}
+
+		if (appointment.doctorProfileId !== doctorProfile.id) {
+			return res.status(403).json({
+				success: false,
+				message: 'You are not authorized to cancel this appointment.',
+			});
+		}
+
+		if (appointment.status !== 'BOOKED') {
+			return res.status(400).json({
+				success: false,
+				message: 'Only booked appointments can be cancelled.',
+			});
+		}
+
+		await prisma.appointment.update({
+			where: { id: appointmentId },
+			data: { status: 'CANCELLED' },
+		});
+
+		// Delete Google Calendar event if one exists
+		if (appointment.calendarEventId) {
+			await deleteCalendarEvent(appointment.patientId, appointment.calendarEventId);
+		}
+
+		// Notify patient
+		try {
+			if (appointment.patient?.email) {
+				await sendEmail({
+					to: appointment.patient.email,
+					subject: 'Appointment Cancelled by Doctor',
+					text: `Your appointment scheduled for ${new Date(
+						appointment.appointmentDate
+					).toLocaleDateString()} at ${
+						appointment.startTime
+					} has been cancelled by the doctor.`,
+				});
+			}
+		} catch (emailError) {
+			console.error('Cancellation email failed:', emailError.message);
+		}
+
+		return res.status(200).json({
+			success: true,
+			message: 'Appointment cancelled successfully.',
+		});
+	} catch (error) {
+		console.error('Doctor cancellation error:', error);
+
+		return res.status(500).json({
+			success: false,
+			message: 'Server error cancelling appointment.',
+		});
+	}
+}
+
 module.exports = {
 	getDoctorAppointments,
 	submitPostVisitNotes,
+	cancelDoctorAppointment,
 };

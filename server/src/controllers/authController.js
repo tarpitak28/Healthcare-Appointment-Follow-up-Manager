@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { google } = require('googleapis');
 const prisma = require('../config/db');
 
 // Helper to generate JWT token
@@ -14,62 +15,58 @@ function generateToken(user) {
 // Register user (Patient / Doctor / Admin)
 async function register(req, res) {
 	try {
-		const { name, email, password, role = 'PATIENT', specialisation, slotDuration, workingHours } = req.body;
+		const { name, email, password } = req.body;
 
 		if (!name || !email || !password) {
-			return res.status(400).json({ success: false, message: 'Please provide name, email, and password' });
+			return res.status(400).json({
+				success: false,
+				message: 'Please provide name, email, and password',
+			});
 		}
 
-		// Check if user already exists
-		const existingUser = await prisma.user.findUnique({ where: { email } });
+		// Public registration is always for PATIENT accounts.
+		const existingUser = await prisma.user.findUnique({
+			where: { email },
+		});
+
 		if (existingUser) {
-			return res.status(400).json({ success: false, message: 'User with this email already exists' });
+			return res.status(400).json({
+				success: false,
+				message: 'User with this email already exists',
+			});
 		}
 
 		const hashedPassword = await bcrypt.hash(password, 10);
 
-		// Create user with transaction if doctor profile is needed
-		const result = await prisma.$transaction(async (tx) => {
-			const user = await tx.user.create({
-				data: {
-					name,
-					email,
-					password: hashedPassword,
-					role: role.toUpperCase(),
-				},
-			});
-
-			// If registered as a doctor, create their profile
-			if (role.toUpperCase() === 'DOCTOR') {
-				await tx.doctorProfile.create({
-					data: {
-						userId: user.id,
-						specialisation: specialisation || 'General Physician',
-						slotDuration: slotDuration ? parseInt(slotDuration) : 30,
-						workingHours: workingHours || { start: '09:00', end: '17:00' },
-					},
-				});
-			}
-
-			return user;
+		const user = await prisma.user.create({
+			data: {
+				name,
+				email,
+				password: hashedPassword,
+				role: 'PATIENT',
+			},
 		});
 
-		const token = generateToken(result);
+		const token = generateToken(user);
 
 		res.status(201).json({
 			success: true,
-			message: 'User registered successfully',
+			message: 'Patient registered successfully',
 			token,
 			user: {
-				id: result.id,
-				name: result.name,
-				email: result.email,
-				role: result.role,
+				id: user.id,
+				name: user.name,
+				email: user.email,
+				role: user.role,
 			},
 		});
 	} catch (error) {
 		console.error('Registration error:', error);
-		res.status(500).json({ success: false, message: 'Server error during registration' });
+
+		res.status(500).json({
+			success: false,
+			message: 'Server error during registration',
+		});
 	}
 }
 
@@ -172,9 +169,86 @@ async function updateProfile(req, res) {
 	}
 }
 
+function createOAuthClient() {
+  return new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    process.env.GOOGLE_REDIRECT_URI
+  );
+}
+
+async function googleLogin(req, res) {
+  try {
+    const { token } = req.query;
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'Access token is required',
+      });
+    }
+
+    const decoded = jwt.verify(
+      token,
+      process.env.JWT_SECRET || 'fallback_secret'
+    );
+
+    const oauth2Client = createOAuthClient();
+
+    const url = oauth2Client.generateAuthUrl({
+      access_type: 'offline',
+      prompt: 'consent',
+      scope: [
+        'https://www.googleapis.com/auth/calendar'
+      ],
+      state: decoded.id,
+    });
+
+    res.redirect(url);
+  } catch (error) {
+    console.error('Google login error:', error);
+
+    return res.status(401).json({
+      success: false,
+      message: 'Invalid or expired access token',
+    });
+  }
+}
+
+async function googleCallback(req, res) {
+  try {
+    const { code, state } = req.query;
+
+    const oauth2Client = createOAuthClient();
+    const { tokens } = await oauth2Client.getToken(code);
+
+    await prisma.googleToken.upsert({
+      where: { userId: state },
+      update: {
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+        expiresAt: new Date(tokens.expiry_date),
+      },
+      create: {
+        userId: state,
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+        expiresAt: new Date(tokens.expiry_date),
+      },
+    });
+
+    res.redirect(`${process.env.CLIENT_URL}/patient?google=connected`);
+  } catch (err) {
+    console.error(err);
+    res.redirect(`${process.env.CLIENT_URL}/patient?google=failed`);
+  }
+}
+
 module.exports = {
-	register,
-	login,
-	getProfile,
-	updateProfile,
+  register,
+  login,
+  getProfile,
+  updateProfile,
+  googleLogin,
+  googleCallback,
 };

@@ -2,6 +2,7 @@ const prisma = require('../config/db');
 const { generatePreVisitSummary } = require('../services/llmService');
 const { sendEmail } = require('../utils/emailService');
 const { generateIcsFile } = require('../utils/icsGenerator');
+const { createCalendarEvent, deleteCalendarEvent } = require('../services/calendarService');
 
 // Search doctors by specialisation or view all
 async function searchDoctors(req, res) {
@@ -55,11 +56,8 @@ async function getAvailableSlots(req, res) {
 			return res.status(400).json({ success: false, message: 'Date is required' });
 		}
 
-		const targetDate = new Date(date);
-		const startOfDay = new Date(targetDate);
-		startOfDay.setHours(0, 0, 0, 0);
-		const endOfDay = new Date(targetDate);
-		endOfDay.setHours(23, 59, 59, 999);
+		const startOfDay = new Date(`${date}T00:00:00.000Z`);
+		const endOfDay = new Date(`${date}T23:59:59.999Z`);
 
 		// Check if doctor is on leave on this date
 		const leave = await prisma.doctorLeave.findFirst({
@@ -141,45 +139,264 @@ async function getAvailableSlots(req, res) {
 	}
 }
 
-// Book an appointment with concurrency safety & LLM Pre-visit summary
+// Book an appointment with server-side slot validation
 async function bookAppointment(req, res) {
 	try {
-		const { doctorProfileId, appointmentDate, startTime, endTime, symptoms } = req.body;
+		const {
+			doctorProfileId,
+			appointmentDate,
+			startTime,
+			endTime,
+			symptoms,
+		} = req.body;
+
 		const patientId = req.user.id;
 
-		if (!doctorProfileId || !appointmentDate || !startTime || !endTime || !symptoms) {
-			return res.status(400).json({ success: false, message: 'Please provide all required appointment details' });
+		// --------------------------------------------------
+		// 1. Basic validation
+		// --------------------------------------------------
+		if (
+			!doctorProfileId ||
+			!appointmentDate ||
+			!startTime ||
+			!endTime ||
+			!symptoms ||
+			!symptoms.trim()
+		) {
+			return res.status(400).json({
+				success: false,
+				message:
+					'Please provide doctor, appointment date, time, and symptoms.',
+			});
 		}
 
-		const targetDate = new Date(appointmentDate);
-		const startOfDay = new Date(targetDate);
-		startOfDay.setUTCHours(0, 0, 0, 0);
-		const endOfDay = new Date(targetDate);
-		endOfDay.setUTCHours(23, 59, 59, 999);
-
-		// 1. Generate Pre-Visit Summary via LLM beforehand
-		const preVisitAI = await generatePreVisitSummary(symptoms);
-
-		// 2. Use Prisma Interactive Transaction with Serializable Isolation / Row locking check to prevent double booking
-		const appointment = await prisma.$transaction(async (tx) => {
-			// Check if the slot is already booked
-			const existingBooking = await tx.appointment.findFirst({
-				where: {
-					doctorProfileId,
-					appointmentDate: {
-						gte: startOfDay,
-						lte: endOfDay,
-					},
-					startTime,
-					status: 'BOOKED',
-				},
+		// --------------------------------------------------
+		// 2. Validate appointment date format
+		// Expected: YYYY-MM-DD
+		// --------------------------------------------------
+		if (!/^\d{4}-\d{2}-\d{2}$/.test(appointmentDate)) {
+			return res.status(400).json({
+				success: false,
+				message: 'Appointment date must be in YYYY-MM-DD format.',
 			});
+		}
 
-			if (existingBooking) {
-				throw new Error('This time slot is already booked. Please choose another slot.');
+		// Prevent JavaScript from silently accepting invalid dates
+		const [year, month, day] = appointmentDate.split('-').map(Number);
+		const targetDate = new Date(year, month - 1, day);
+
+		if (
+			targetDate.getFullYear() !== year ||
+			targetDate.getMonth() !== month - 1 ||
+			targetDate.getDate() !== day
+		) {
+			return res.status(400).json({
+				success: false,
+				message: 'Invalid appointment date.',
+			});
+		}
+
+		// --------------------------------------------------
+		// 3. Prevent booking appointments in the past
+		// --------------------------------------------------
+		const today = new Date();
+		const todayStart = new Date(
+			today.getFullYear(),
+			today.getMonth(),
+			today.getDate()
+		);
+
+		if (targetDate < todayStart) {
+			return res.status(400).json({
+				success: false,
+				message: 'Appointments cannot be booked for a past date.',
+			});
+		}
+
+		// --------------------------------------------------
+		// 4. Validate time format
+		// Expected: HH:mm
+		// --------------------------------------------------
+		const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+		if (!timeRegex.test(startTime) || !timeRegex.test(endTime)) {
+			return res.status(400).json({
+				success: false,
+				message: 'Invalid appointment time format.',
+			});
+		}
+
+		const timeToMinutes = (time) => {
+			const [hours, minutes] = time.split(':').map(Number);
+			return hours * 60 + minutes;
+		};
+
+		const requestedStartMinutes = timeToMinutes(startTime);
+		const requestedEndMinutes = timeToMinutes(endTime);
+
+		if (requestedEndMinutes <= requestedStartMinutes) {
+			return res.status(400).json({
+				success: false,
+				message: 'Appointment end time must be after start time.',
+			});
+		}
+
+		// --------------------------------------------------
+		// 5. Fetch doctor profile
+		// --------------------------------------------------
+		const doctorProfile = await prisma.doctorProfile.findUnique({
+			where: {
+				id: doctorProfileId,
+			},
+			include: {
+				user: true,
+			},
+		});
+
+		if (!doctorProfile) {
+			return res.status(404).json({
+				success: false,
+				message: 'Doctor profile not found.',
+			});
+		}
+
+		// --------------------------------------------------
+		// 6. Validate doctor's working hours
+		// --------------------------------------------------
+		const workingHours = doctorProfile.workingHours || {
+			start: '09:00',
+			end: '17:00',
+		};
+
+		if (!workingHours.start || !workingHours.end) {
+			return res.status(500).json({
+				success: false,
+				message: 'Doctor working hours are not configured correctly.',
+			});
+		}
+
+		const workingStartMinutes = timeToMinutes(workingHours.start);
+		const workingEndMinutes = timeToMinutes(workingHours.end);
+
+		const slotDuration = doctorProfile.slotDuration || 30;
+
+		if (requestedStartMinutes < workingStartMinutes) {
+			return res.status(400).json({
+				success: false,
+				message: 'Selected time is outside the doctor working hours.',
+			});
+		}
+
+		if (requestedEndMinutes > workingEndMinutes) {
+			return res.status(400).json({
+				success: false,
+				message: 'Selected time is outside the doctor working hours.',
+			});
+		}
+
+		// --------------------------------------------------
+		// 7. Validate slot duration
+		// --------------------------------------------------
+		if (
+			requestedEndMinutes - requestedStartMinutes !==
+			slotDuration
+		) {
+			return res.status(400).json({
+				success: false,
+				message: `Appointment duration must be ${slotDuration} minutes.`,
+			});
+		}
+
+		// --------------------------------------------------
+		// 8. Validate that start time aligns with slot grid
+		// --------------------------------------------------
+		const minutesFromWorkingStart =
+			requestedStartMinutes - workingStartMinutes;
+
+		if (
+			minutesFromWorkingStart < 0 ||
+			minutesFromWorkingStart % slotDuration !== 0
+		) {
+			return res.status(400).json({
+				success: false,
+				message: 'Selected time is not a valid appointment slot.',
+			});
+		}
+
+		// --------------------------------------------------
+		// 9. Check doctor leave
+		// --------------------------------------------------
+		const startOfDay = new Date(`${appointmentDate}T00:00:00.000Z`);
+		const endOfDay = new Date(`${appointmentDate}T23:59:59.999Z`);
+
+		const leave = await prisma.doctorLeave.findFirst({
+			where: {
+				doctorProfileId,
+				startDate: {
+					lte: endOfDay,
+				},
+				endDate: {
+					gte: startOfDay,
+				},
+			},
+		});
+
+		if (leave) {
+			return res.status(400).json({
+				success: false,
+				message: 'Doctor is on leave on the selected date.',
+			});
+		}
+
+		// --------------------------------------------------
+		// 10. Same-day past-time validation
+		// --------------------------------------------------
+		if (
+			targetDate.getTime() === todayStart.getTime()
+		) {
+			const currentMinutes =
+				today.getHours() * 60 + today.getMinutes();
+
+			if (requestedStartMinutes <= currentMinutes) {
+				return res.status(400).json({
+					success: false,
+					message: 'This appointment time has already passed.',
+				});
 			}
+		}
 
-			// Create the appointment
+		// --------------------------------------------------
+		// 11. Check existing BOOKED appointment
+		// --------------------------------------------------
+		const existingBooking = await prisma.appointment.findFirst({
+			where: {
+				doctorProfileId,
+				appointmentDate: startOfDay,
+				startTime,
+				status: 'BOOKED',
+			},
+		});
+
+		if (existingBooking) {
+			return res.status(409).json({
+				success: false,
+				message:
+					'This time slot is already booked. Please choose another slot.',
+			});
+		}
+
+		// --------------------------------------------------
+		// 12. Generate AI pre-visit summary
+		// --------------------------------------------------
+		const preVisitAI = await generatePreVisitSummary(
+			symptoms.trim()
+		);
+
+		// --------------------------------------------------
+		// 13. Create appointment
+		// Database constraint provides final duplicate protection
+		// --------------------------------------------------
+		const appointment = await prisma.$transaction(async (tx) => {
 			const newAppointment = await tx.appointment.create({
 				data: {
 					patientId,
@@ -188,13 +405,18 @@ async function bookAppointment(req, res) {
 					startTime,
 					endTime,
 					status: 'BOOKED',
-					symptoms,
+					symptoms: symptoms.trim(),
 					urgencyLevel: preVisitAI.urgencyLevel,
 					chiefComplaint: preVisitAI.chiefComplaint,
-					suggestedQuestions: preVisitAI.suggestedQuestions,
+					suggestedQuestions:
+						preVisitAI.suggestedQuestions,
 				},
 				include: {
-					doctorProfile: { include: { user: true } },
+					doctorProfile: {
+						include: {
+							user: true,
+						},
+					},
 					patient: true,
 				},
 			});
@@ -202,43 +424,87 @@ async function bookAppointment(req, res) {
 			return newAppointment;
 		});
 
-		// Trigger confirmation email with calendar invite attached
+		// Create Google Calendar event
 		try {
-			const patientUser = await prisma.user.findUnique({ where: { id: req.user.id } });
-			const doctorProfile = await prisma.doctorProfile.findUnique({
-				where: { id: doctorProfileId },
-				include: { user: true },
-			});
-			const doctorUser = doctorProfile?.user || (await prisma.user.findUnique({ where: { id: doctorProfileId } }));
-
-			const icsContent = generateIcsFile({
-				title: `Consultation with Dr. ${doctorUser?.name || 'Doctor'}`,
-				description: `Symptoms: ${symptoms}`,
-				startTime,
-				endTime,
-				date: new Date(appointmentDate),
+			const calendarEventId = await createCalendarEvent(patientId, {
+				appointmentDate: appointment.appointmentDate,
+				startTime: appointment.startTime,
+				endTime: appointment.endTime,
+				doctorName: appointment.doctorProfile?.user?.name,
+				patientName: appointment.patient?.name,
+				chiefComplaint: appointment.chiefComplaint,
 			});
 
-			await sendEmail({
-				to: patientUser.email,
-				subject: 'Appointment Confirmation & Calendar Invite',
-				text: `Your appointment is confirmed for ${appointmentDate} from ${startTime} to ${endTime}.`,
-				calendarInvite: icsContent,
-			});
-		} catch (emailErr) {
-			console.error('Email trigger failed:', emailErr);
+			if (calendarEventId) {
+				await prisma.appointment.update({
+					where: { id: appointment.id },
+					data: { calendarEventId },
+				});
+
+				appointment.calendarEventId = calendarEventId;
+			}
+		} catch (calendarError) {
+			console.error('Google Calendar event creation failed:', calendarError);
 		}
 
-		res.status(201).json({
+		// --------------------------------------------------
+		// 14. Send confirmation email
+		// Email failure must not cancel the appointment
+		// --------------------------------------------------
+		try {
+			const patientUser = await prisma.user.findUnique({
+				where: {
+					id: patientId,
+				},
+			});
+
+			const doctorUser = doctorProfile.user;
+
+			const icsContent = generateIcsFile({
+				title: `Consultation with Dr. ${
+					doctorUser?.name || 'Doctor'
+				}`,
+				description: `Symptoms: ${symptoms.trim()}`,
+				startTime,
+				endTime,
+				date: new Date(`${appointmentDate}T00:00:00.000Z`),
+			});
+
+			if (patientUser?.email) {
+				await sendEmail({
+					to: patientUser.email,
+					subject: 'Appointment Confirmation & Calendar Invite',
+					text: `Your appointment is confirmed for ${appointmentDate} from ${startTime} to ${endTime}.`,
+					calendarInvite: icsContent,
+				});
+			}
+		} catch (emailErr) {
+			console.error(
+				'Email trigger failed:',
+				emailErr.message
+			);
+		}
+
+		return res.status(201).json({
 			success: true,
 			message: 'Appointment booked successfully',
 			appointment,
 		});
 	} catch (error) {
 		console.error('Booking error:', error);
-		res.status(400).json({
+
+		// Prisma unique constraint violation
+		if (error.code === 'P2002') {
+			return res.status(409).json({
+				success: false,
+				message:
+					'This time slot is already booked. Please choose another slot.',
+			});
+		}
+
+		return res.status(500).json({
 			success: false,
-			message: error.message || 'Server error during appointment booking',
+			message: 'Server error during appointment booking.',
 		});
 	}
 }
@@ -265,9 +531,76 @@ async function getPatientAppointments(req, res) {
 	}
 }
 
+// Cancel a patient's own appointment
+async function cancelAppointment(req, res) {
+	try {
+		const { appointmentId } = req.params;
+		const patientId = req.user.id;
+
+		const appointment = await prisma.appointment.findUnique({
+			where: { id: appointmentId },
+			include: {
+				patient: true,
+				doctorProfile: {
+					include: { user: true },
+				},
+			},
+		});
+
+		if (!appointment || appointment.patientId !== patientId) {
+			return res.status(404).json({
+				success: false,
+				message: 'Appointment not found or unauthorized',
+			});
+		}
+
+		if (appointment.status !== 'BOOKED') {
+			return res.status(400).json({
+				success: false,
+				message: 'Only booked appointments can be cancelled',
+			});
+		}
+
+		await prisma.appointment.update({
+			where: { id: appointmentId },
+			data: { status: 'CANCELLED' },
+		});
+
+		// Delete Google Calendar event
+		if (appointment.calendarEventId) {
+			await deleteCalendarEvent(
+				patientId,
+				appointment.calendarEventId
+			);
+		}
+
+		// Send cancellation email
+		await sendEmail({
+			to: appointment.patient.email,
+			subject: 'Appointment Cancelled',
+			text: `Your appointment with Dr. ${appointment.doctorProfile.user.name} on ${new Date(
+				appointment.appointmentDate
+			).toLocaleDateString()} at ${appointment.startTime} has been cancelled.`,
+		});
+
+		res.json({
+			success: true,
+			message: 'Appointment cancelled successfully',
+		});
+	} catch (error) {
+		console.error('Cancel appointment error:', error);
+
+		res.status(500).json({
+			success: false,
+			message: 'Server error cancelling appointment',
+		});
+	}
+}
+
 module.exports = {
 	searchDoctors,
 	getAvailableSlots,
 	bookAppointment,
 	getPatientAppointments,
+	cancelAppointment,
 };

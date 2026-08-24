@@ -145,8 +145,130 @@ async function markDoctorLeave(req, res) {
   }
 }
 
+// Get all appointments for admin
+async function getAllAppointments(req, res) {
+	try {
+		const appointments = await prisma.appointment.findMany({
+			include: {
+				patient: {
+					select: {
+						id: true,
+						name: true,
+						email: true,
+					},
+				},
+				doctorProfile: {
+					include: {
+						user: {
+							select: {
+								id: true,
+								name: true,
+								email: true,
+							},
+						},
+					},
+				},
+			},
+			orderBy: [
+				{ appointmentDate: 'desc' },
+				{ startTime: 'asc' },
+			],
+		});
+
+		res.status(200).json({
+			success: true,
+			appointments,
+		});
+	} catch (error) {
+		console.error('Fetch all appointments error:', error);
+
+		res.status(500).json({
+			success: false,
+			message: 'Server error fetching appointments',
+		});
+	}
+}
+
+// Admin cancels any booked appointment
+async function cancelAppointment(req, res) {
+	try {
+		const { appointmentId } = req.params;
+
+		const appointment = await prisma.appointment.findUnique({
+			where: { id: appointmentId },
+			include: {
+				patient: true,
+				doctorProfile: {
+					include: {
+						user: true,
+					},
+				},
+			},
+		});
+
+		if (!appointment) {
+			return res.status(404).json({
+				success: false,
+				message: 'Appointment not found.',
+			});
+		}
+
+		if (appointment.status !== 'BOOKED') {
+			return res.status(400).json({
+				success: false,
+				message: 'Only booked appointments can be cancelled.',
+			});
+		}
+
+		await prisma.appointment.update({
+			where: { id: appointmentId },
+			data: {
+				status: 'CANCELLED',
+			},
+		});
+
+		// Send cancellation email to patient
+		try {
+			if (appointment.patient?.email) {
+				await sendEmail({
+					to: appointment.patient.email,
+					subject: 'Appointment Cancelled by Admin',
+					text: `Your appointment with Dr. ${
+						appointment.doctorProfile?.user?.name || 'Doctor'
+					} scheduled for ${
+						new Date(
+							appointment.appointmentDate
+						).toLocaleDateString()
+					} at ${
+						appointment.startTime
+					} has been cancelled by the hospital administrator.`,
+				});
+			}
+		} catch (emailError) {
+			console.error(
+				'Admin cancellation email failed:',
+				emailError.message
+			);
+		}
+
+		res.status(200).json({
+			success: true,
+			message: 'Appointment cancelled successfully.',
+		});
+	} catch (error) {
+		console.error('Admin cancellation error:', error);
+
+		res.status(500).json({
+			success: false,
+			message: 'Server error cancelling appointment',
+		});
+	}
+}
+
 module.exports = {
 	getAllDoctors,
 	createDoctor,
 	markDoctorLeave,
+	getAllAppointments,
+	cancelAppointment,
 };

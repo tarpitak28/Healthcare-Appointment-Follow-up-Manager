@@ -4,6 +4,7 @@ const authRoutes = require('./routes/authRoutes'); // Add this line
 const adminRoutes = require('./routes/adminRoutes'); // Add this line
 const patientRoutes = require('./routes/patientRoutes'); // Add this line
 const doctorRoutes = require('./routes/doctorRoutes'); // Add this line
+const medicationRoutes = require('./routes/medicationRoutes');
 
 const app = express();
 
@@ -15,6 +16,7 @@ app.use('/api/auth', authRoutes); // Add this line
 app.use('/api/admin', adminRoutes); // Add this line
 app.use('/api/patient', patientRoutes); // Add this line
 app.use('/api/doctor', doctorRoutes); // Add this line
+app.use('/api/medications', medicationRoutes);
 
 // Base Route
 app.get('/api/health', (req, res) => {

@@ -5,6 +5,7 @@ const {
   getAvailableSlots,
   bookAppointment,
   getPatientAppointments,
+  cancelAppointment,
 } = require('../controllers/patientController');
 const { verifyToken, requireRole } = require('../middleware/authMiddleware');
 
@@ -14,5 +15,10 @@ router.get('/doctors', searchDoctors);
 router.get('/doctors/:doctorProfileId/slots', getAvailableSlots);
 router.post('/appointments', bookAppointment);
 router.get('/appointments', getPatientAppointments);
+router.delete('/appointments/:appointmentId', cancelAppointment);
+router.post('/appointments/:appointmentId/cancel', cancelAppointment);
+router.patch('/appointments/:appointmentId/cancel', cancelAppointment);
+router.put('/appointments/:appointmentId/cancel', cancelAppointment);
+router.delete('/appointments/:appointmentId/cancel', cancelAppointment);
 
 module.exports = router;

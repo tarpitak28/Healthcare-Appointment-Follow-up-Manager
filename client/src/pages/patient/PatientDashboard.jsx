@@ -22,12 +22,106 @@ export default function PatientDashboard() {
   const [name, setName] = useState(user?.name || '');
   const [email, setEmail] = useState(user?.email || '');
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  // Medication reminder state
+  const [medicationReminders, setMedicationReminders] = useState([]);
+  const [showReminderModal, setShowReminderModal] = useState(false);
+  const [selectedMedicine, setSelectedMedicine] = useState(null);
+
+  const [reminderTimes, setReminderTimes] = useState(['09:00']);
+  const [reminderStartDate, setReminderStartDate] = useState('');
+  const [reminderEndDate, setReminderEndDate] = useState('');
+
+  const getLocalDateString = (date = new Date()) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+
+    return `${year}-${month}-${day}`;
+  };
+
+  const formatAppointmentDate = (dateValue) => {
+    if (!dateValue) return '';
+
+    // PostgreSQL DATE may come as "2026-08-26T00:00:00.000Z"
+    // We only want the calendar date, without timezone conversion.
+    const datePart = String(dateValue).split('T')[0];
+
+    const [year, month, day] = datePart.split('-');
+
+    return `${day}/${month}/${year}`;
+  };
+
+  const todayStr = getLocalDateString();
 
   useEffect(() => {
     fetchDoctors();
     fetchAppointments();
+    fetchMedicationReminders();
   }, []);
+
+  const fetchMedicationReminders = async () => {
+    try {
+      const response = await API.get('/medications');
+
+      if (response.data.success) {
+        setMedicationReminders(response.data.reminders);
+      }
+    } catch (error) {
+      console.error('Failed to fetch medication reminders:', error);
+    }
+  };
+
+  const saveMedicationReminder = async () => {
+    if (!selectedMedicine) return;
+
+    if (!reminderStartDate || !reminderEndDate) {
+      alert('Please select start and end dates.');
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token');
+
+      const response = await fetch(
+        'http://localhost:5000/api/medications',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            appointmentId: selectedMedicine.appointmentId,
+            medicineName: selectedMedicine.name,
+            dosage: selectedMedicine.dosage,
+            frequency: selectedMedicine.frequency,
+            reminderTimes,
+            startDate: reminderStartDate,
+            endDate: reminderEndDate,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to save reminder');
+      }
+
+      alert('Medication reminder saved successfully!');
+
+      setShowReminderModal(false);
+
+      // Reset form
+      setSelectedMedicine(null);
+      setReminderTimes(['09:00']);
+
+      fetchMedicationReminders();
+    } catch (error) {
+      console.error('Save reminder error:', error);
+      alert(error.message);
+    }
+  };
 
   const fetchDoctors = async () => {
     try {
@@ -133,6 +227,14 @@ export default function PatientDashboard() {
             <p className="text-sm text-slate-600">Search doctors, check live slots, and book consultations.</p>
           </div>
           <div className="flex space-x-2">
+            <button
+              onClick={() =>
+                window.location.href = `http://localhost:5000/api/auth/google?token=${localStorage.getItem("token")}`
+              }
+              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium"
+            >
+              Connect Google Calendar
+            </button>
             <button onClick={() => setIsEditing(!isEditing)} className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-lg font-medium hover:bg-indigo-100">
               {isEditing ? 'Cancel Edit' : 'Edit Profile'}
             </button>
@@ -254,8 +356,14 @@ export default function PatientDashboard() {
                 appointments.map((app) => (
                   <div key={app.id} className="p-4 border rounded-lg space-y-2">
                     <div className="flex justify-between items-center">
-                      <span className="font-semibold text-slate-800">Date: {new Date(app.appointmentDate).toLocaleDateString()}</span>
-                      <span className={`px-2 py-1 text-xs rounded-full font-medium ${app.status === 'BOOKED' ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-600'}`}>
+                      <span className="font-semibold text-slate-800">Date: {String(app.appointmentDate).split('T')[0].split('-').reverse().join('/')}</span>
+                      <span className={`px-2 py-1 text-xs rounded-full font-medium ${
+                        app.status === 'BOOKED'
+                          ? 'bg-emerald-50 text-emerald-600'
+                          : app.status === 'COMPLETED'
+                          ? 'bg-blue-50 text-blue-600'
+                          : 'bg-red-50 text-red-600'
+                      }`}>
                         {app.status}
                       </span>
                     </div>
@@ -271,12 +379,225 @@ export default function PatientDashboard() {
                         <strong>Post-Visit Summary:</strong> {app.postVisitSummary}
                       </div>
                     )}
+
+                    {app.prescription && (
+                      <div className="mt-3 p-3 bg-blue-50 text-blue-800 rounded-lg text-sm">
+                        <strong>Prescription</strong>
+
+                        {app.prescription.diagnosis && (
+                          <p className="mt-2">
+                            <strong>Diagnosis:</strong> {app.prescription.diagnosis}
+                          </p>
+                        )}
+
+                        {app.prescription.medicines?.length > 0 && (
+                          <div className="mt-2">
+                            <strong>Medicines:</strong>
+
+                            <ul className="divide-y divide-blue-100 mt-1">
+                              {app.prescription.medicines.map((med, index) => (
+                                <li
+                                  key={index}
+                                  className="flex items-center justify-between gap-3 py-2"
+                                >
+                                  <span>
+                                    {med.name} {med.dosage && `— ${med.dosage}`} {med.frequency && `— ${med.frequency}`} {med.duration && `— ${med.duration}`}
+                                  </span>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedMedicine({
+                                        ...med,
+                                        appointmentId: app.id,
+                                      });
+
+                                      setReminderStartDate(
+                                        String(app.appointmentDate || '').slice(0, 10) || ''
+                                      );
+
+                                      setReminderEndDate(
+                                        String(app.appointmentDate || '').slice(0, 10) || ''
+                                      );
+
+                                      setShowReminderModal(true);
+                                    }}
+                                    className="px-3 py-1 text-sm bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 font-medium"
+                                  >
+                                    🔔 Set Reminder
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {app.prescription.followUpInstructions && (
+                          <p className="mt-2">
+                            <strong>Follow-up:</strong>{' '}
+                            {app.prescription.followUpInstructions}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    {app.status === 'BOOKED' && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const confirmed = window.confirm(
+                            `Cancel your appointment on ${String(app.appointmentDate).split('T')[0].split('-').reverse().join('/')} at ${app.startTime}?`
+                          );
+
+                          if (!confirmed) return;
+
+                          try {
+                            await API.delete(
+                              `/patient/appointments/${app.id}`
+                            );
+
+                            setMessage('Appointment cancelled successfully.');
+
+                            // Refresh appointments and slots
+                            fetchAppointments();
+
+                            if (selectedDoctor && selectedDate) {
+                              handleFetchSlots(selectedDoctor, selectedDate);
+                            }
+                          } catch (err) {
+                            setMessage(
+                              err.response?.data?.message ||
+                                'Failed to cancel appointment.'
+                            );
+                          }
+                        }}
+                        className="px-3 py-2 bg-red-50 text-red-600 rounded-lg text-sm font-medium hover:bg-red-100"
+                      >
+                        Cancel Appointment
+                      </button>
+                    )}
                   </div>
                 ))
               )}
             </div>
           </div>
         </div>
+
+        {showReminderModal && (
+            <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+                <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl">
+
+                    <h2 className="text-xl font-bold mb-4">
+                        Medication Reminder
+                    </h2>
+
+                    {selectedMedicine && (
+                        <div className="bg-indigo-50 p-3 rounded-lg mb-4">
+                            <p className="font-semibold">
+                                {selectedMedicine.name}
+                            </p>
+                            <p className="text-sm text-gray-600">
+                                {selectedMedicine.dosage}
+                            </p>
+                            <p className="text-sm text-gray-600">
+                                {selectedMedicine.frequency}
+                            </p>
+                        </div>
+                    )}
+
+                    <label className="block text-sm font-medium mb-1">
+                        Reminder Time
+                    </label>
+
+                    {reminderTimes.map((time, index) => (
+                        <div key={index} className="flex gap-2 mb-2">
+                            <input
+                                type="time"
+                                value={time}
+                                onChange={(e) => {
+                                    const updated = [...reminderTimes];
+                                    updated[index] = e.target.value;
+                                    setReminderTimes(updated);
+                                }}
+                                className="border rounded-lg px-3 py-2 flex-1"
+                            />
+
+                            {reminderTimes.length > 1 && (
+                                <button
+                                    type="button"
+                                    onClick={() =>
+                                        setReminderTimes(
+                                            reminderTimes.filter(
+                                                (_, i) => i !== index
+                                            )
+                                        )
+                                    }
+                                    className="text-red-500 px-2"
+                                >
+                                    ✕
+                                </button>
+                            )}
+                        </div>
+                    ))}
+
+                    <button
+                        type="button"
+                        onClick={() =>
+                            setReminderTimes([
+                                ...reminderTimes,
+                                '09:00',
+                            ])
+                        }
+                        className="text-indigo-600 text-sm mb-4"
+                    >
+                        + Add another time
+                    </button>
+
+                    <label className="block text-sm font-medium mb-1">
+                        Start Date
+                    </label>
+
+                    <input
+                        type="date"
+                        value={reminderStartDate}
+                        onChange={(e) =>
+                            setReminderStartDate(e.target.value)
+                        }
+                        className="border rounded-lg px-3 py-2 w-full mb-4"
+                    />
+
+                    <label className="block text-sm font-medium mb-1">
+                        End Date
+                    </label>
+
+                    <input
+                        type="date"
+                        value={reminderEndDate}
+                        onChange={(e) =>
+                            setReminderEndDate(e.target.value)
+                        }
+                        className="border rounded-lg px-3 py-2 w-full mb-5"
+                    />
+
+                    <div className="flex justify-end gap-3">
+                        <button
+                            type="button"
+                            onClick={() => setShowReminderModal(false)}
+                            className="px-4 py-2 bg-gray-100 rounded-lg"
+                        >
+                            Cancel
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={saveMedicationReminder}
+                            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium"
+                        >
+                            Save Reminder
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
       </div>
     </div>
   );

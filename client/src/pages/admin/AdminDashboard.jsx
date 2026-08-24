@@ -7,6 +7,7 @@ export default function AdminDashboard() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [doctors, setDoctors] = useState([]);
+  const [appointments, setAppointments] = useState([]);
   const [leaveDate, setLeaveDate] = useState('');
   const [selectedDocId, setSelectedDocId] = useState('');
   const [message, setMessage] = useState('');
@@ -20,6 +21,7 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     fetchDoctors();
+    fetchAppointments();
   }, []);
 
   const fetchDoctors = async () => {
@@ -28,6 +30,38 @@ export default function AdminDashboard() {
       setDoctors(res.data.doctors || []);
     } catch (err) {
       console.error('Error fetching doctors', err);
+    }
+  };
+
+  const fetchAppointments = async () => {
+    try {
+      const res = await API.get('/admin/appointments');
+      setAppointments(res.data.appointments || []);
+    } catch (err) {
+      console.error('Error fetching appointments', err);
+    }
+  };
+
+  const handleCancelAppointment = async (appointment) => {
+    const confirmed = window.confirm(
+      `Cancel the appointment with ${appointment.patient?.name} and Dr. ${appointment.doctorProfile?.user?.name}?`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      await API.post(
+        `/admin/appointments/${appointment.id}/cancel`
+      );
+
+      setMessage('Appointment cancelled successfully.');
+
+      fetchAppointments();
+    } catch (err) {
+      setMessage(
+        err.response?.data?.message ||
+        'Failed to cancel appointment.'
+      );
     }
   };
 
@@ -152,6 +186,70 @@ export default function AdminDashboard() {
                 ))
               )}
             </div>
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-xl shadow-sm mt-6">
+          <h2 className="text-lg font-bold text-slate-800 mb-4">
+            All Appointments
+          </h2>
+
+          <div className="space-y-4 max-h-[500px] overflow-y-auto">
+            {appointments.length === 0 ? (
+              <p className="text-sm text-slate-500">
+                No appointments found.
+              </p>
+            ) : (
+              appointments.map((app) => (
+                <div
+                  key={app.id}
+                  className="p-4 border rounded-lg flex flex-col md:flex-row justify-between gap-4"
+                >
+                  <div className="space-y-1">
+                    <p className="font-semibold text-slate-800">
+                      Patient: {app.patient?.name}
+                    </p>
+
+                    <p className="text-sm text-slate-600">
+                      Doctor: Dr. {app.doctorProfile?.user?.name}
+                    </p>
+
+                    <p className="text-sm text-slate-600">
+                      Date:{' '}
+                      {new Date(
+                        app.appointmentDate
+                      ).toLocaleDateString()}{' '}
+                      | Time: {app.startTime} - {app.endTime}
+                    </p>
+
+                    <p className="text-sm text-slate-600">
+                      Symptoms: {app.symptoms}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center">
+                    {app.status === 'BOOKED' ? (
+                      <button
+                        onClick={() =>
+                          handleCancelAppointment(app)
+                        }
+                        className="px-4 py-2 bg-red-50 text-red-600 rounded-lg text-sm font-medium hover:bg-red-100"
+                      >
+                        Cancel Appointment
+                      </button>
+                    ) : app.status === 'CANCELLED' ? (
+                      <span className="px-3 py-1 bg-red-50 text-red-600 text-xs rounded-full font-medium">
+                        Cancelled
+                      </span>
+                    ) : (
+                      <span className="px-3 py-1 bg-emerald-50 text-emerald-600 text-xs rounded-full font-medium">
+                        Completed
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>
