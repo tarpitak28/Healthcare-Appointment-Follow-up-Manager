@@ -6,6 +6,7 @@ const {
   login,
   getProfile,
   updateProfile,
+  resetPassword,
   googleLogin,
   googleCallback
 } = require('../controllers/authController');
@@ -14,6 +15,7 @@ const { verifyToken } = require('../middleware/authMiddleware');
 
 router.post('/register', register);
 router.post('/login', login);
+router.post('/reset-password', resetPassword);
 
 router.get('/me', verifyToken, getProfile);
 router.put('/me', verifyToken, updateProfile);

@@ -272,11 +272,69 @@ async function googleCallback(req, res) {
   }
 }
 
+// Reset password directly in database
+async function resetPassword(req, res) {
+	try {
+		const { email, newPassword } = req.body;
+
+		if (!email || !newPassword) {
+			return res.status(400).json({
+				success: false,
+				message: 'Please provide email and new password',
+			});
+		}
+
+		if (newPassword.length < 6) {
+			return res.status(400).json({
+				success: false,
+				message: 'Password must be at least 6 characters long',
+			});
+		}
+
+		const cleanEmail = email.trim().toLowerCase();
+		const user = await prisma.user.findFirst({
+			where: {
+				email: {
+					equals: cleanEmail,
+					mode: 'insensitive',
+				},
+			},
+		});
+
+		if (!user) {
+			return res.status(404).json({
+				success: false,
+				message: 'No account found with this email address',
+			});
+		}
+
+		const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+		await prisma.user.update({
+			where: { id: user.id },
+			data: { password: hashedPassword },
+		});
+
+		return res.status(200).json({
+			success: true,
+			message: `Password updated successfully for ${user.email} (${user.role}). You can now log in.`,
+		});
+	} catch (error) {
+		console.error('Reset password error:', error);
+		return res.status(500).json({
+			success: false,
+			message: 'Server error while updating password in database',
+		});
+	}
+}
+
 module.exports = {
   register,
   login,
   getProfile,
   updateProfile,
+  resetPassword,
   googleLogin,
   googleCallback,
 };
+

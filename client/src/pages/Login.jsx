@@ -12,7 +12,18 @@ export default function Login() {
   const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
+
+  // Password Reset Modal State
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [resetError, setResetError] = useState('');
+  const [resetSuccess, setResetSuccess] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
+
+  const { login, resetPassword } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
@@ -37,10 +48,52 @@ export default function Login() {
     setError('');
   };
 
+  const handleOpenReset = () => {
+    setResetEmail(email || '');
+    setNewPassword('');
+    setConfirmPassword('');
+    setResetError('');
+    setResetSuccess('');
+    setShowResetModal(true);
+  };
+
+  const handleResetSubmit = async (e) => {
+    e.preventDefault();
+    setResetError('');
+    setResetSuccess('');
+
+    if (newPassword.length < 6) {
+      setResetError('New password must be at least 6 characters long.');
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setResetError('Passwords do not match. Please retype identical passwords.');
+      return;
+    }
+
+    setResetLoading(true);
+    try {
+      const res = await resetPassword(resetEmail, newPassword);
+      setResetSuccess(res.message || 'Password updated directly in database!');
+      setEmail(resetEmail);
+      setPassword(newPassword);
+
+      setTimeout(() => {
+        setShowResetModal(false);
+        setResetSuccess('');
+      }, 1600);
+    } catch (err) {
+      setResetError(err.response?.data?.message || 'Failed to update password in database.');
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#F7F9FA] flex items-center justify-center p-4 sm:p-6 font-sans">
       <div className="max-w-5xl w-full bg-white rounded-2xl shadow-card border border-[#E5E7EB] overflow-hidden grid grid-cols-1 md:grid-cols-12 min-h-[550px]">
-        {/* Left Branding Panel (Desktop/Tablet Split ~45%) (Section 24) */}
+        {/* Left Branding Panel (Desktop/Tablet Split ~45%) */}
         <div className="hidden md:flex md:col-span-5 bg-gradient-to-br from-[#237C9A] via-[#1B637B] to-[#12485A] p-8 sm:p-10 text-white flex-col justify-between relative overflow-hidden">
           <div className="absolute -top-12 -right-12 w-48 h-48 bg-[#3FA3C3]/20 rounded-full blur-2xl pointer-events-none"></div>
 
@@ -80,7 +133,7 @@ export default function Login() {
           </div>
         </div>
 
-        {/* Right Form Panel (~55% Desktop, 100% Mobile) (Section 24) */}
+        {/* Right Form Panel (~55% Desktop, 100% Mobile) */}
         <div className="md:col-span-7 p-6 sm:p-10 lg:p-12 flex flex-col justify-between bg-white">
           <div className="space-y-6 max-w-sm mx-auto w-full">
             {/* Mobile Header Logo (<768px) */}
@@ -123,7 +176,7 @@ export default function Login() {
 
                 <button
                   type="button"
-                  onClick={() => handleFillDemo('admin@healthpulse.app')}
+                  onClick={() => handleFillDemo('admin@example.com')}
                   className="py-2 px-1.5 sm:px-2 bg-white hover:bg-[#EAF7FA] hover:text-[#237C9A] border border-[#E5E7EB] hover:border-[#3FA3C3]/40 text-[#202124] text-[11px] sm:text-xs font-semibold rounded-xl transition text-center shadow-xs min-h-[44px] sm:min-h-0"
                 >
                   🛡️ Admin
@@ -191,9 +244,13 @@ export default function Login() {
                   <span>Remember me</span>
                 </label>
 
-                <a href="#forgot" onClick={(e) => { e.preventDefault(); alert('Password reset link sent to your registered email.'); }} className="text-[#3FA3C3] hover:underline font-semibold py-1">
+                <button
+                  type="button"
+                  onClick={handleOpenReset}
+                  className="text-[#3FA3C3] hover:underline font-semibold py-1 focus:outline-none"
+                >
                   Forgot password?
-                </a>
+                </button>
               </div>
 
               <Button
@@ -217,6 +274,146 @@ export default function Login() {
           </div>
         </div>
       </div>
+
+      {/* FORGOT / RESET PASSWORD MODAL */}
+      {showResetModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white max-w-md w-full rounded-2xl shadow-xl border border-[#E5E7EB] p-6 space-y-5 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between border-b border-[#E5E7EB] pb-3">
+              <div>
+                <h3 className="text-lg font-bold text-[#202124]">Reset Account Password</h3>
+                <p className="text-xs text-[#6F7378] mt-0.5">
+                  Update password directly in the database for Patient, Doctor, or Admin.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowResetModal(false)}
+                className="text-[#6F7378] hover:text-[#202124] font-bold text-lg p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Account Role Quick Select */}
+            <div className="bg-[#F7F9FA] p-3 rounded-xl border border-[#E5E7EB] space-y-1.5">
+              <div className="text-[11px] font-bold text-[#6F7378]">QUICK SELECT ACCOUNT ROLE:</div>
+              <div className="grid grid-cols-3 gap-1.5 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setResetEmail('patient@example.com')}
+                  className="py-1.5 px-2 bg-white hover:bg-[#EAF7FA] border border-[#E5E7EB] rounded-lg text-[#202124] font-semibold text-[11px]"
+                >
+                  👤 Patient
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setResetEmail('doctor@example.com')}
+                  className="py-1.5 px-2 bg-white hover:bg-[#EAF7FA] border border-[#E5E7EB] rounded-lg text-[#202124] font-semibold text-[11px]"
+                >
+                  👨‍⚕️ Doctor
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setResetEmail('admin@example.com')}
+                  className="py-1.5 px-2 bg-white hover:bg-[#EAF7FA] border border-[#E5E7EB] rounded-lg text-[#202124] font-semibold text-[11px]"
+                >
+                  🛡️ Admin
+                </button>
+              </div>
+            </div>
+
+            {/* Alert Messages */}
+            {resetError && (
+              <div className="p-3 bg-[#FDF2F2] border border-[#E46B6B]/30 text-[#E46B6B] text-xs rounded-xl font-medium">
+                ⚠️ {resetError}
+              </div>
+            )}
+
+            {resetSuccess && (
+              <div className="p-3 bg-[#EAF7FA] border border-[#3FA3C3]/40 text-[#237C9A] text-xs rounded-xl font-bold flex items-center space-x-2">
+                <span>✅</span>
+                <span>{resetSuccess}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleResetSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-[#6F7378] mb-1">
+                  Registered Email Address
+                </label>
+                <input
+                  type="email"
+                  required
+                  placeholder="e.g. patient@example.com"
+                  className="w-full px-4 py-2.5 bg-[#F7F9FA] border border-[#E5E7EB] rounded-xl text-[#202124] text-sm outline-none focus:border-[#3FA3C3] focus:bg-white min-h-[44px]"
+                  value={resetEmail}
+                  onChange={(e) => setResetEmail(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-[#6F7378] mb-1">
+                  New Password
+                </label>
+                <div className="relative">
+                  <input
+                    type={showNewPassword ? 'text' : 'password'}
+                    required
+                    minLength={6}
+                    placeholder="Minimum 6 characters"
+                    className="w-full px-4 py-2.5 bg-[#F7F9FA] border border-[#E5E7EB] rounded-xl text-[#202124] text-sm outline-none focus:border-[#3FA3C3] focus:bg-white pr-14 min-h-[44px]"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    className="absolute right-3 top-2.5 text-[#6F7378] hover:text-[#202124] text-xs font-bold px-1"
+                  >
+                    {showNewPassword ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-[#6F7378] mb-1">
+                  Confirm New Password
+                </label>
+                <input
+                  type={showNewPassword ? 'text' : 'password'}
+                  required
+                  minLength={6}
+                  placeholder="Retype new password"
+                  className="w-full px-4 py-2.5 bg-[#F7F9FA] border border-[#E5E7EB] rounded-xl text-[#202124] text-sm outline-none focus:border-[#3FA3C3] focus:bg-white min-h-[44px]"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                />
+              </div>
+
+              <div className="flex items-center justify-end space-x-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowResetModal(false)}
+                  className="px-4 py-2.5 border border-[#E5E7EB] rounded-xl text-xs font-bold text-[#6F7378] hover:bg-[#F7F9FA] min-h-[44px]"
+                >
+                  Cancel
+                </button>
+
+                <Button
+                  type="submit"
+                  variant="primary"
+                  size="md"
+                  disabled={resetLoading}
+                  className="min-h-[44px]"
+                >
+                  {resetLoading ? 'Updating DB...' : 'Update Password in Database'}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
