@@ -23,6 +23,18 @@ export default function PatientDashboard() {
   const [name, setName] = useState(user?.name || '');
   const [email, setEmail] = useState(user?.email || '');
 
+  const handleConnectCalendar = async () => {
+    try {
+      const res = await API.get('/calendar/auth-url');
+      if (res.data && res.data.url) {
+        window.location.href = res.data.url;
+      }
+    } catch (error) {
+      console.error('Failed to initiate Google OAuth', error);
+      alert('Google Calendar OAuth is not configured or failed to generate URL.');
+    }
+  };
+
   // Medication reminder state
   const [medicationReminders, setMedicationReminders] = useState([]);
   const [showReminderModal, setShowReminderModal] = useState(false);
