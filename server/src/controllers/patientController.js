@@ -493,15 +493,28 @@ async function bookAppointment(req, res) {
 				date: new Date(`${appointmentDate}T00:00:00.000Z`),
 			});
 
+			// 1. Dispatch Notification to Patient
 			if (patientUser?.email) {
 				await createAndSendNotification({
 					recipientUserId: patientId,
 					type: 'BOOKING_CONFIRMATION',
 					appointmentId: appointment.id,
-					subject: 'Appointment Confirmation & Calendar Invite',
-					bodyText: `Your appointment is confirmed for ${appointmentDate} from ${startTime} to ${endTime}.`,
-					eventKey: `${appointment.id}:BOOKING_CONFIRMATION`,
+					subject: 'Appointment Confirmation & Calendar Invite — HealthPulse',
+					bodyText: `Your appointment with Dr. ${doctorUser?.name || 'Doctor'} is confirmed for ${appointmentDate} from ${startTime} to ${endTime}.`,
+					eventKey: `${appointment.id}:PATIENT_BOOKING_CONFIRMATION`,
 					attachments: icsContent,
+				});
+			}
+
+			// 2. Dispatch Notification to Doctor
+			if (doctorUser?.id) {
+				await createAndSendNotification({
+					recipientUserId: doctorUser.id,
+					type: 'BOOKING_CONFIRMATION',
+					appointmentId: appointment.id,
+					subject: 'New Patient Appointment Booked — HealthPulse',
+					bodyText: `New consultation booked by ${patientUser?.name || 'Patient'} for ${appointmentDate} from ${startTime} to ${endTime}. Chief Complaint: ${preVisitAI.chiefComplaint || 'General'}`,
+					eventKey: `${appointment.id}:DOCTOR_BOOKING_CONFIRMATION`,
 				});
 			}
 		} catch (emailErr) {
@@ -614,17 +627,31 @@ async function cancelAppointment(req, res) {
 			);
 		}
 
-		// Send cancellation email via NotificationService
+		// 1. Send cancellation email to Patient
 		await createAndSendNotification({
 			recipientUserId: patientId,
 			type: 'APPOINTMENT_CANCELLATION',
 			appointmentId: appointment.id,
-			subject: 'Appointment Cancelled',
-			bodyText: `Your appointment with Dr. ${appointment.doctorProfile.user.name} on ${new Date(
+			subject: 'Appointment Cancelled Notice — HealthPulse',
+			bodyText: `Your appointment with Dr. ${appointment.doctorProfile?.user?.name || 'Doctor'} on ${new Date(
 				appointment.appointmentDate
 			).toLocaleDateString()} at ${appointment.startTime} has been cancelled.`,
-			eventKey: `${appointment.id}:APPOINTMENT_CANCELLATION`,
+			eventKey: `${appointment.id}:PATIENT_CANCELLATION`,
 		});
+
+		// 2. Send cancellation email to Doctor
+		if (appointment.doctorProfile?.user?.id) {
+			await createAndSendNotification({
+				recipientUserId: appointment.doctorProfile.user.id,
+				type: 'APPOINTMENT_CANCELLATION',
+				appointmentId: appointment.id,
+				subject: 'Appointment Cancelled Notice — HealthPulse',
+				bodyText: `The appointment with ${appointment.patient?.name || 'Patient'} on ${new Date(
+					appointment.appointmentDate
+				).toLocaleDateString()} at ${appointment.startTime} has been cancelled.`,
+				eventKey: `${appointment.id}:DOCTOR_CANCELLATION`,
+			});
+		}
 
 		res.json({
 			success: true,
