@@ -1,5 +1,7 @@
 const prisma = require('../config/db');
 const { generatePreVisitSummary } = require('../services/llmService');
+const { sendEmail } = require('../utils/emailService');
+const { generateIcsFile } = require('../utils/icsGenerator');
 
 // Search doctors by specialisation or view all
 async function searchDoctors(req, res) {
@@ -28,13 +30,6 @@ async function searchDoctors(req, res) {
 
 		const doctors = await prisma.user.findMany({
 			where: whereClause,
-			include: {
-				doctorProfile: {
-					include: {
-						leaveDays: true,
-					},
-				},
-			},
 			select: {
 				id: true,
 				name: true,
@@ -53,41 +48,47 @@ async function searchDoctors(req, res) {
 // Get available slots for a doctor on a specific date
 async function getAvailableSlots(req, res) {
 	try {
-		const { doctorProfileId } = req.params;
+		const doctorId = req.params.doctorId || req.params.doctorProfileId;
 		const { date } = req.query; // YYYY-MM-DD
 
 		if (!date) {
-			return res.status(400).json({ success: false, message: 'Please provide a date query parameter (YYYY-MM-DD)' });
+			return res.status(400).json({ success: false, message: 'Date is required' });
 		}
 
 		const targetDate = new Date(date);
+		const startOfDay = new Date(targetDate);
+		startOfDay.setHours(0, 0, 0, 0);
+		const endOfDay = new Date(targetDate);
+		endOfDay.setHours(23, 59, 59, 999);
 
-		// 1. Check if doctor profile exists
+		// Check if doctor is on leave on this date
+		const leave = await prisma.doctorLeave.findFirst({
+			where: {
+				doctorProfileId: doctorId,
+				startDate: { lte: endOfDay },
+				endDate: { gte: startOfDay },
+			},
+		});
+
+		if (leave) {
+			return res.status(200).json({
+				success: true,
+				isOnLeave: true,
+				message: 'Doctor is on leave on this date.',
+				slots: [],
+			});
+		}
+
+		// 1. Fetch doctor profile
 		const doctorProfile = await prisma.doctorProfile.findUnique({
-			where: { id: doctorProfileId },
-			include: { leaveDays: true },
+			where: { id: doctorId },
 		});
 
 		if (!doctorProfile) {
 			return res.status(404).json({ success: false, message: 'Doctor profile not found' });
 		}
 
-		// 2. Check if doctor is on leave on this date
-		const startOfDay = new Date(targetDate);
-		startOfDay.setUTCHours(0, 0, 0, 0);
-		const endOfDay = new Date(targetDate);
-		endOfDay.setUTCHours(23, 59, 59, 999);
-
-		const isLeave = doctorProfile.leaveDays.some((leave) => {
-			const leaveDate = new Date(leave.date);
-			return leaveDate.toISOString().split('T')[0] === startOfDay.toISOString().split('T')[0];
-		});
-
-		if (isLeave) {
-			return res.status(200).json({ success: true, date, slots: [], message: 'Doctor is on leave on this date' });
-		}
-
-		// 3. Generate all potential slots based on working hours and slot duration
+		// 2. Generate all potential slots based on working hours and slot duration
 		const workingHours = doctorProfile.workingHours || { start: '09:00', end: '17:00' };
 		const slotDurationMinutes = doctorProfile.slotDuration || 30;
 
@@ -112,10 +113,10 @@ async function getAvailableSlots(req, res) {
 			allSlots.push({ startTime, endTime });
 		}
 
-		// 4. Fetch already booked appointments for this doctor on this date
+		// 3. Fetch already booked appointments for this doctor on this date
 		const bookedAppointments = await prisma.appointment.findMany({
 			where: {
-				doctorProfileId,
+				doctorProfileId: doctorId,
 				appointmentDate: {
 					gte: startOfDay,
 					lte: endOfDay,
@@ -127,7 +128,7 @@ async function getAvailableSlots(req, res) {
 
 		const bookedTimes = new Set(bookedAppointments.map((app) => app.startTime));
 
-		// 5. Filter out booked slots
+		// 4. Filter out booked slots
 		const availableSlots = allSlots.map((slot) => ({
 			...slot,
 			isAvailable: !bookedTimes.has(slot.startTime),
@@ -135,8 +136,8 @@ async function getAvailableSlots(req, res) {
 
 		res.status(200).json({ success: true, date, slots: availableSlots });
 	} catch (error) {
-		console.error('Get available slots error:', error);
-		res.status(500).json({ success: false, message: 'Server error fetching available slots' });
+		console.error('Get slots error:', error);
+		res.status(500).json({ success: false, message: 'Server error fetching slots' });
 	}
 }
 
@@ -200,6 +201,33 @@ async function bookAppointment(req, res) {
 
 			return newAppointment;
 		});
+
+		// Trigger confirmation email with calendar invite attached
+		try {
+			const patientUser = await prisma.user.findUnique({ where: { id: req.user.id } });
+			const doctorProfile = await prisma.doctorProfile.findUnique({
+				where: { id: doctorProfileId },
+				include: { user: true },
+			});
+			const doctorUser = doctorProfile?.user || (await prisma.user.findUnique({ where: { id: doctorProfileId } }));
+
+			const icsContent = generateIcsFile({
+				title: `Consultation with Dr. ${doctorUser?.name || 'Doctor'}`,
+				description: `Symptoms: ${symptoms}`,
+				startTime,
+				endTime,
+				date: new Date(appointmentDate),
+			});
+
+			await sendEmail({
+				to: patientUser.email,
+				subject: 'Appointment Confirmation & Calendar Invite',
+				text: `Your appointment is confirmed for ${appointmentDate} from ${startTime} to ${endTime}.`,
+				calendarInvite: icsContent,
+			});
+		} catch (emailErr) {
+			console.error('Email trigger failed:', emailErr);
+		}
 
 		res.status(201).json({
 			success: true,

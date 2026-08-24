@@ -144,8 +144,37 @@ async function getProfile(req, res) {
 	}
 }
 
+async function updateProfile(req, res) {
+	try {
+		const { name, email } = req.body;
+		const userId = req.user.id;
+
+		const updatedUser = await prisma.user.update({
+			where: { id: userId },
+			data: { name, email },
+			include: { doctorProfile: true },
+		});
+
+		res.status(200).json({
+			success: true,
+			message: 'Profile updated successfully',
+			user: {
+				id: updatedUser.id,
+				name: updatedUser.name,
+				email: updatedUser.email,
+				role: updatedUser.role,
+				doctorProfile: updatedUser.doctorProfile || null,
+			},
+		});
+	} catch (error) {
+		console.error('Update profile error:', error);
+		res.status(500).json({ success: false, message: 'Server error updating profile' });
+	}
+}
+
 module.exports = {
 	register,
 	login,
 	getProfile,
+	updateProfile,
 };

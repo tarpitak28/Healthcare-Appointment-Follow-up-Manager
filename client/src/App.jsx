@@ -3,6 +3,9 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import PatientDashboard from './pages/patient/PatientDashboard';
+import DoctorDashboard from './pages/doctor/DoctorDashboard';
+import AdminDashboard from './pages/admin/AdminDashboard';
 
 function ProtectedRoute({ children, allowedRole }) {
 	const { user, loading } = useAuth();
@@ -23,7 +26,7 @@ export default function App() {
 						path="/patient"
 						element={
 							<ProtectedRoute allowedRole="PATIENT">
-								<div className="p-8 text-center text-2xl font-bold">Patient Dashboard (Coming Next!)</div>
+								<PatientDashboard />
 							</ProtectedRoute>
 						}
 					/>
@@ -31,7 +34,7 @@ export default function App() {
 						path="/doctor"
 						element={
 							<ProtectedRoute allowedRole="DOCTOR">
-								<div className="p-8 text-center text-2xl font-bold">Doctor Dashboard (Coming Next!)</div>
+								<DoctorDashboard />
 							</ProtectedRoute>
 						}
 					/>
@@ -39,7 +42,7 @@ export default function App() {
 						path="/admin"
 						element={
 							<ProtectedRoute allowedRole="ADMIN">
-								<div className="p-8 text-center text-2xl font-bold">Admin Dashboard (Coming Next!)</div>
+								<AdminDashboard />
 							</ProtectedRoute>
 						}
 					/>

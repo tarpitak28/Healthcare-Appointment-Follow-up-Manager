@@ -85,7 +85,10 @@ async function deleteCalendarEvent(userId, eventId) {
 	}
 }
 
+const { generateIcsFile } = require('../utils/calendarService');
+
 module.exports = {
 	createCalendarEvent,
 	deleteCalendarEvent,
+	generateIcsFile,
 };

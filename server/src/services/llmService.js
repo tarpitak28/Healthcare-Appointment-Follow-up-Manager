@@ -16,7 +16,7 @@ async function generatePreVisitSummary(symptomsText) {
 			return {
 				urgencyLevel: 'MEDIUM',
 				chiefComplaint: symptomsText.slice(0, 100) || 'General discomfort',
-				suggestgedQuestions: [
+				suggestedQuestions: [
 					'How long have you been experiencing these symptoms?',
 					'Have you tried any over-the-counter medications?',
 					'Do these symptoms worsen at any specific time of day?'
@@ -40,7 +40,7 @@ async function generatePreVisitSummary(symptomsText) {
 		return {
 			urgencyLevel: urgency,
 			chiefComplaint: result.chiefComplaint || symptomsText,
-			suggestgedQuestions: result.suggestgedQuestions || ['Could you elaborate on the onset of symptoms?']
+			suggestedQuestions: result.suggestedQuestions || ['Could you elaborate on the onset of symptoms?']
 		};
 	} catch (error) {
 		console.error('LLM Pre-visit summary generation failed, using fallback:', error.message);
@@ -48,7 +48,7 @@ async function generatePreVisitSummary(symptomsText) {
 		return {
 			urgencyLevel: 'MEDIUM',
 			chiefComplaint: symptomsText.slice(0, 100) || 'Patient reported symptoms',
-			suggestgedQuestions: [
+			suggestedQuestions: [
 				'Can you describe when the symptoms started?',
 				'Are there any aggravating factors?',
 				'Have you noticed any related changes?'

@@ -55,7 +55,8 @@ model DoctorLeave {
 	id              String        @id @default(uuid())
 	doctorProfileId String
 	doctorProfile   DoctorProfile @relation(fields: [doctorProfileId], references: [id], onDelete: Cascade)
-	date            DateTime      @db.Date
+	startDate       DateTime
+	endDate         DateTime
 	reason          String?
 	createdAt       DateTime      @default(now())
 }
