@@ -1,18 +1,37 @@
 const nodemailer = require('nodemailer');
 
-const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST || 'smtp.ethereal.email',
-  port: process.env.EMAIL_PORT || 587,
-  auth: {
-    user: process.env.EMAIL_USER || 'your_test_user',
-    pass: process.env.EMAIL_PASS || 'your_test_password',
-  },
-});
+const emailUser = process.env.EMAIL_USER || '';
+const emailHost = process.env.EMAIL_HOST || 'smtp.ethereal.email';
+const isGmail = emailHost.includes('gmail') || emailUser.endsWith('@gmail.com');
+
+const transportConfig = isGmail
+  ? {
+      service: 'gmail',
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    }
+  : {
+      host: emailHost,
+      port: parseInt(process.env.EMAIL_PORT || '587', 10),
+      secure: parseInt(process.env.EMAIL_PORT || '587', 10) === 465,
+      auth: {
+        user: process.env.EMAIL_USER || 'your_test_user',
+        pass: process.env.EMAIL_PASS || 'your_test_password',
+      },
+    };
+
+const transporter = nodemailer.createTransport(transportConfig);
 
 async function sendEmail({ to, subject, text, html, calendarInvite }) {
   try {
+    const fromAddress = process.env.EMAIL_USER
+      ? `"Healthcare Platform" <${process.env.EMAIL_USER}>`
+      : '"Healthcare Platform" <support@healthcareportal.com>';
+
     const mailOptions = {
-      from: '"Healthcare Platform" <support@healthcareportal.com>',
+      from: fromAddress,
       to,
       subject,
       text,
@@ -31,10 +50,10 @@ async function sendEmail({ to, subject, text, html, calendarInvite }) {
     }
 
     const info = await transporter.sendMail(mailOptions);
-    console.log('Email sent: %s', info.messageId);
+    console.log('[EmailService] Email sent successfully: %s', info.messageId);
     return true;
   } catch (error) {
-    console.error('Error sending email:', error);
+    console.error('[EmailService] Error sending email:', error.message);
     return false;
   }
 }
