@@ -4,7 +4,10 @@
 	"main": "src/server.js",
 	"scripts": {
 		"start": "node src/server.js",
-		"dev": "nodemon src/server.js"
+		"dev": "nodemon src/server.js",
+		"test:db:reset": "npx prisma migrate deploy",
+		"test": "jest --runInBand --forceExit",
+		"test:coverage": "jest --coverage --runInBand --forceExit"
 	},
 	"dependencies": {
 		"@google/generative-ai": "^0.24.1",
@@ -20,7 +23,9 @@
 		"zod": "^4.4.3"
 	},
 	"devDependencies": {
+		"jest": "^30.4.2",
 		"nodemon": "^3.1.0",
-		"prisma": "^5.22.0"
+		"prisma": "^5.22.0",
+		"supertest": "^7.2.2"
 	}
 }

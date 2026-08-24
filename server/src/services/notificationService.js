@@ -47,19 +47,29 @@ async function createAndSendNotification({
     }
 
     if (!notification) {
-      notification = await prisma.notificationLog.create({
-        data: {
-          recipientUserId,
-          type,
-          appointmentId,
-          subject,
-          bodyText: bodyText || '',
-          bodyHtml,
-          eventKey,
-          status: 'PENDING',
-          nextAttemptAt: new Date(),
-        },
-      });
+      try {
+        notification = await prisma.notificationLog.create({
+          data: {
+            recipientUserId,
+            type,
+            appointmentId,
+            subject,
+            bodyText: bodyText || '',
+            bodyHtml,
+            eventKey,
+            status: 'PENDING',
+            nextAttemptAt: new Date(),
+          },
+        });
+      } catch (createErr) {
+        if (createErr.code === 'P2002') {
+          notification = await prisma.notificationLog.findUnique({
+            where: { eventKey },
+          });
+        } else {
+          throw createErr;
+        }
+      }
     }
 
     // 2. Fetch recipient user email
