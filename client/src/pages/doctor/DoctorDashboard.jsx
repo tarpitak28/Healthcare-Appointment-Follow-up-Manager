@@ -28,12 +28,29 @@ export default function DoctorDashboard() {
   const [diagnosis, setDiagnosis] = useState('');
   const [medicines, setMedicines] = useState([{ name: '', dosage: '', frequency: '', duration: '' }]);
   const [followUpInstructions, setFollowUpInstructions] = useState('');
+  const [isLiveCallActive, setIsLiveCallActive] = useState(false);
   const [message, setMessage] = useState('');
 
   // Doctor Settings State (Online Consult & Availability)
   const [onlineEnabled, setOnlineEnabled] = useState(true);
   const [consultTypes, setConsultTypes] = useState({ text: true, video: true, phone: true });
   const [consultFee, setConsultFee] = useState('800');
+
+  // Pre-fill consultation fields when selectedAppt changes
+  React.useEffect(() => {
+    if (selectedAppt) {
+      setClinicalNotes(selectedAppt.clinicalNotes || '');
+      const rx = typeof selectedAppt.prescription === 'object' && selectedAppt.prescription ? selectedAppt.prescription : {};
+      setDiagnosis(rx.diagnosis || '');
+      setFollowUpInstructions(rx.followUpInstructions || '');
+      if (Array.isArray(rx.medicines) && rx.medicines.length > 0) {
+        setMedicines(rx.medicines);
+      } else {
+        setMedicines([{ name: '', dosage: '', frequency: '', duration: '' }]);
+      }
+      setIsLiveCallActive(selectedAppt.status === 'BOOKED');
+    }
+  }, [selectedAppt]);
 
   // 1. Fetch Doctor Appointments via React Query (10s auto-polling)
   const { data: appointments = [] } = useQuery({
@@ -55,16 +72,17 @@ export default function DoctorDashboard() {
       return res.data;
     },
     onSuccess: () => {
-      setMessage('✅ Consultation completed and patient care plan generated!');
+      setMessage('✅ Consultation completed and patient care plan generated successfully!');
       setSelectedAppt(null);
       setClinicalNotes('');
       setDiagnosis('');
       setMedicines([{ name: '', dosage: '', frequency: '', duration: '' }]);
       setFollowUpInstructions('');
+      setIsLiveCallActive(false);
       queryClient.invalidateQueries(['doctorAppointments']);
     },
     onError: (err) => {
-      setMessage(err.response?.data?.message || 'Failed to submit notes');
+      setMessage(err.response?.data?.message || 'Failed to submit post-visit consultation notes');
     },
   });
 
@@ -80,6 +98,12 @@ export default function DoctorDashboard() {
         followUpInstructions,
       },
     });
+  };
+
+  const handleStartConsultation = () => {
+    setIsLiveCallActive(true);
+    window.open('https://meet.google.com/new', '_blank');
+    setMessage('📹 Live consultation room launched in new tab.');
   };
 
   const filteredAppointments = appointments.filter((app) => {
@@ -126,32 +150,32 @@ export default function DoctorDashboard() {
           {/* DASHBOARD OVERVIEW */}
           {activeTab === 'dashboard' && (
             <div className="space-y-6">
-              {/* Section 18 & 38: Statistic Cards Responsive Grid */}
+              {/* Statistic Cards Responsive Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-white p-4 sm:p-5 rounded-2xl border border-[#E5E7EB] shadow-xs flex flex-col justify-between">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-[#6F7378]">Today's Appointments</span>
-                  <h3 className="text-2xl sm:text-3xl font-extrabold text-[#202124] mt-2">12</h3>
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-[#6F7378]">Total Appointments</span>
+                  <h3 className="text-2xl sm:text-3xl font-extrabold text-[#202124] mt-2">{appointments.length || 12}</h3>
                 </div>
 
                 <div className="bg-white p-4 sm:p-5 rounded-2xl border border-[#E5E7EB] shadow-xs flex flex-col justify-between">
                   <span className="text-[11px] font-bold uppercase tracking-wider text-[#6F7378]">Completed</span>
-                  <h3 className="text-2xl sm:text-3xl font-extrabold text-[#3FAF7A] mt-2">{completedCount || 8}</h3>
+                  <h3 className="text-2xl sm:text-3xl font-extrabold text-[#3FAF7A] mt-2">{completedCount}</h3>
                 </div>
 
                 <div className="bg-white p-4 sm:p-5 rounded-2xl border border-[#E5E7EB] shadow-xs flex flex-col justify-between">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-[#6F7378]">Pending</span>
-                  <h3 className="text-2xl sm:text-3xl font-extrabold text-[#F2B84B] mt-2">{bookedCount || 3}</h3>
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-[#6F7378]">Pending Bookings</span>
+                  <h3 className="text-2xl sm:text-3xl font-extrabold text-[#F2B84B] mt-2">{bookedCount}</h3>
                 </div>
 
                 <div className="bg-white p-4 sm:p-5 rounded-2xl border border-[#E5E7EB] shadow-xs flex flex-col justify-between">
                   <span className="text-[11px] font-bold uppercase tracking-wider text-[#6F7378]">Cancelled</span>
-                  <h3 className="text-2xl sm:text-3xl font-extrabold text-[#E46B6B] mt-2">{cancelledCount || 1}</h3>
+                  <h3 className="text-2xl sm:text-3xl font-extrabold text-[#E46B6B] mt-2">{cancelledCount}</h3>
                 </div>
               </div>
 
               {/* Split-Pane Consultation Workspace */}
               <div className="grid grid-cols-12 gap-6">
-                {/* Left Queue (Stacked on mobile: 12 Cols, Desktop: 5 Cols) */}
+                {/* Left Queue */}
                 <div className="col-span-12 lg:col-span-5 bg-white rounded-2xl border border-[#E5E7EB] p-4 sm:p-5 space-y-4 shadow-xs">
                   <div className="flex justify-between items-center pb-2 border-b border-[#E5E7EB]">
                     <h3 className="font-bold text-[#202124] text-sm flex items-center space-x-2">
@@ -161,41 +185,59 @@ export default function DoctorDashboard() {
                   </div>
 
                   <div className="space-y-3 max-h-[500px] overflow-y-auto">
-                    {filteredAppointments.map((app) => (
-                      <div
-                        key={app.id}
-                        onClick={() => setSelectedAppt(app)}
-                        className={`p-4 rounded-xl border cursor-pointer transition space-y-2 ${
-                          selectedAppt?.id === app.id
-                            ? 'bg-[#EAF7FA] border-[#3FA3C3] shadow-xs'
-                            : 'bg-[#F7F9FA] border-[#E5E7EB] hover:border-[#CBD5E1]'
-                        }`}
-                      >
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <span className="text-xs font-bold text-[#202124] block">{app.startTime}</span>
-                            <h4 className="font-bold text-xs text-[#202124] mt-0.5">{app.patient?.name}</h4>
+                    {filteredAppointments.length === 0 ? (
+                      <EmptyState title="No appointments scheduled" description="Appointments booked by patients will appear in this schedule list." />
+                    ) : (
+                      filteredAppointments.map((app) => (
+                        <div
+                          key={app.id}
+                          onClick={() => setSelectedAppt(app)}
+                          className={`p-4 rounded-xl border cursor-pointer transition space-y-2 ${
+                            selectedAppt?.id === app.id
+                              ? 'bg-[#EAF7FA] border-[#3FA3C3] shadow-xs'
+                              : 'bg-[#F7F9FA] border-[#E5E7EB] hover:border-[#CBD5E1]'
+                          }`}
+                        >
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <span className="text-xs font-bold text-[#202124] block">{app.startTime} – {app.endTime}</span>
+                              <h4 className="font-bold text-xs text-[#202124] mt-0.5">{app.patient?.name || 'Patient'}</h4>
+                            </div>
+                            <StatusBadge status={app.status === 'BOOKED' ? 'CONFIRMED' : app.status} />
                           </div>
-                          <StatusBadge status={app.status === 'BOOKED' ? 'CONFIRMED' : app.status} />
+                          <p className="text-[11px] text-[#6F7378]">General Consultation</p>
                         </div>
-                        <p className="text-[11px] text-[#6F7378]">General Consultation</p>
-                      </div>
-                    ))}
+                      ))
+                    )}
                   </div>
                 </div>
 
-                {/* Right Active Consultation Workspace (Stacked on mobile: 12 Cols, Desktop: 7 Cols) */}
+                {/* Right Active Consultation Workspace */}
                 <div className="col-span-12 lg:col-span-7 bg-white rounded-2xl border border-[#E5E7EB] p-5 sm:p-6 space-y-6 shadow-xs">
                   {!selectedAppt ? (
-                    <EmptyState title="No patient selected" description="Select a patient from Today's Schedule to start the consultation." />
+                    <EmptyState title="No patient selected" description="Select a patient from Today's Schedule to start or review the consultation." />
                   ) : (
                     <div className="space-y-6">
                       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-4 border-b border-[#E5E7EB]">
                         <div>
-                          <h3 className="font-bold text-base text-[#202124]">{selectedAppt.patient?.name}</h3>
-                          <p className="text-xs text-[#6F7378]">Slot: {selectedAppt.startTime} – {selectedAppt.endTime}</p>
+                          <div className="flex items-center space-x-2">
+                            <h3 className="font-bold text-base text-[#202124]">{selectedAppt.patient?.name}</h3>
+                            <StatusBadge status={selectedAppt.status} />
+                          </div>
+                          <p className="text-xs text-[#6F7378] mt-0.5">Slot: {selectedAppt.startTime} – {selectedAppt.endTime}</p>
                         </div>
-                        <Button variant="primary" size="sm" className="w-full sm:w-auto min-h-[44px]">Start Consultation</Button>
+
+                        {selectedAppt.status === 'BOOKED' && (
+                          <Button
+                            type="button"
+                            variant={isLiveCallActive ? "primary" : "secondary"}
+                            size="sm"
+                            className="w-full sm:w-auto min-h-[44px]"
+                            onClick={handleStartConsultation}
+                          >
+                            {isLiveCallActive ? '📹 Launch Video Room' : 'Start Consultation'}
+                          </Button>
+                        )}
                       </div>
 
                       {/* AI Diagnostic Triage */}
@@ -210,7 +252,7 @@ export default function DoctorDashboard() {
                               Urgency: {selectedAppt.urgencyLevel}
                             </span>
                           </div>
-                          <p><strong>Chief Complaint:</strong> {selectedAppt.chiefComplaint}</p>
+                          <p><strong>Chief Complaint:</strong> {selectedAppt.chiefComplaint || selectedAppt.symptoms}</p>
                         </div>
                       )}
 
@@ -229,19 +271,109 @@ export default function DoctorDashboard() {
                         </div>
 
                         <div>
-                          <label className="block text-xs font-bold uppercase text-[#6F7378] mb-1">Clinical Notes</label>
+                          <label className="block text-xs font-bold uppercase text-[#6F7378] mb-1">Clinical Notes & Findings</label>
                           <textarea
                             rows="3"
                             required
-                            placeholder="Enter clinical examination findings..."
+                            placeholder="Enter clinical examination findings, vitals, and observations..."
                             className="w-full px-4 py-3 sm:py-2.5 bg-[#F7F9FA] border border-[#E5E7EB] rounded-xl text-xs text-[#202124] outline-none"
                             value={clinicalNotes}
                             onChange={(e) => setClinicalNotes(e.target.value)}
                           ></textarea>
                         </div>
 
-                        <Button type="submit" variant="primary" className="w-full min-h-[44px]">
-                          Complete Consultation
+                        {/* Prescribed Medications Section */}
+                        <div className="space-y-3 p-4 bg-[#F7F9FA] border border-[#E5E7EB] rounded-2xl">
+                          <div className="flex justify-between items-center">
+                            <label className="block text-xs font-bold uppercase text-[#6F7378]">Prescribed Medications</label>
+                            <button
+                              type="button"
+                              onClick={() => setMedicines([...medicines, { name: '', dosage: '', frequency: '', duration: '' }])}
+                              className="text-xs font-bold text-[#3FA3C3] hover:underline focus:outline-none"
+                            >
+                              + Add Medication
+                            </button>
+                          </div>
+
+                          {medicines.map((med, idx) => (
+                            <div key={idx} className="grid grid-cols-1 sm:grid-cols-4 gap-2 items-center">
+                              <input
+                                type="text"
+                                placeholder="Medicine Name"
+                                value={med.name}
+                                onChange={(e) => {
+                                  const updated = [...medicines];
+                                  updated[idx].name = e.target.value;
+                                  setMedicines(updated);
+                                }}
+                                className="px-3 py-2 bg-white border border-[#E5E7EB] rounded-xl text-xs outline-none min-h-[38px]"
+                              />
+                              <input
+                                type="text"
+                                placeholder="Dosage (e.g. 500mg)"
+                                value={med.dosage}
+                                onChange={(e) => {
+                                  const updated = [...medicines];
+                                  updated[idx].dosage = e.target.value;
+                                  setMedicines(updated);
+                                }}
+                                className="px-3 py-2 bg-white border border-[#E5E7EB] rounded-xl text-xs outline-none min-h-[38px]"
+                              />
+                              <input
+                                type="text"
+                                placeholder="Frequency (e.g. Twice Daily)"
+                                value={med.frequency}
+                                onChange={(e) => {
+                                  const updated = [...medicines];
+                                  updated[idx].frequency = e.target.value;
+                                  setMedicines(updated);
+                                }}
+                                className="px-3 py-2 bg-white border border-[#E5E7EB] rounded-xl text-xs outline-none min-h-[38px]"
+                              />
+                              <div className="flex items-center space-x-1">
+                                <input
+                                  type="text"
+                                  placeholder="Duration (e.g. 5 days)"
+                                  value={med.duration}
+                                  onChange={(e) => {
+                                    const updated = [...medicines];
+                                    updated[idx].duration = e.target.value;
+                                    setMedicines(updated);
+                                  }}
+                                  className="w-full px-3 py-2 bg-white border border-[#E5E7EB] rounded-xl text-xs outline-none min-h-[38px]"
+                                />
+                                {medicines.length > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setMedicines(medicines.filter((_, i) => i !== idx))}
+                                    className="text-red-500 font-bold px-1 text-xs"
+                                  >
+                                    ✕
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold uppercase text-[#6F7378] mb-1">Follow-Up Instructions</label>
+                          <input
+                            type="text"
+                            placeholder="e.g. Review after 7 days if symptoms persist"
+                            className="w-full px-4 py-3 sm:py-2.5 bg-[#F7F9FA] border border-[#E5E7EB] rounded-xl text-xs text-[#202124] font-semibold outline-none min-h-[44px]"
+                            value={followUpInstructions}
+                            onChange={(e) => setFollowUpInstructions(e.target.value)}
+                          />
+                        </div>
+
+                        <Button
+                          type="submit"
+                          variant="primary"
+                          disabled={submitPostVisitMutation.isPending}
+                          className="w-full min-h-[44px]"
+                        >
+                          {submitPostVisitMutation.isPending ? 'Completing & Generating Care Plan...' : 'Complete Consultation'}
                         </Button>
                       </form>
                     </div>
