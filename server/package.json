@@ -5,10 +5,15 @@
 	"scripts": {
 		"start": "node src/server.js",
 		"dev": "nodemon src/server.js",
-		"test:db:reset": "npx prisma migrate deploy",
+		"postinstall": "prisma generate --schema=../prisma/schema.prisma",
+		"test:db:reset": "npx prisma migrate deploy --schema=../prisma/schema.prisma",
 		"test": "jest --runInBand --forceExit",
 		"test:coverage": "jest --coverage --runInBand --forceExit"
 	},
+	"prisma": {
+		"schema": "../prisma/schema.prisma"
+	},
+
 	"dependencies": {
 		"@google/generative-ai": "^0.24.1",
 		"@prisma/client": "^5.22.0",
