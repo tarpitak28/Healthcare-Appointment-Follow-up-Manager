@@ -31,7 +31,16 @@ app.use('/api/doctor', doctorRoutes); // Add this line
 app.use('/api/medications', medicationRoutes);
 app.use('/api/calendar', calendarRoutes);
 
-// Base Route
+// Base & Health Routes
+app.get('/', (req, res) => {
+  res.status(200).json({
+    status: 'OK',
+    message: 'Healthcare Appointment & Follow-Up Manager Backend API',
+    healthCheck: '/api/health',
+    clientUrl: process.env.CLIENT_URL || 'http://localhost:5173',
+  });
+});
+
 app.get('/api/health', (req, res) => {
 	res.status(200).json({ status: 'OK', message: 'Healthcare API is running smoothly' });
 });
