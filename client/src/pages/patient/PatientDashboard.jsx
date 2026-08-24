@@ -52,6 +52,12 @@ export default function PatientDashboard() {
     fetchAppointments();
     fetchMedicationReminders();
 
+    // Real-Time Automated Frontend Syncing (polls every 10 seconds)
+    const syncInterval = setInterval(() => {
+      fetchAppointments();
+      fetchMedicationReminders();
+    }, 10000);
+
     const searchParams = new URLSearchParams(window.location.search);
     const googleStatus = searchParams.get('google');
     if (googleStatus === 'connected') {
@@ -59,6 +65,8 @@ export default function PatientDashboard() {
     } else if (googleStatus === 'failed' || googleStatus === 'error') {
       setMessage('ℹ️ Note: Background Google Calendar OAuth requires production credentials. You can use the "📅 Add to Google Calendar" button or "📥 Download .ics Invite" button on any booked appointment!');
     }
+
+    return () => clearInterval(syncInterval);
   }, []);
 
   const handleConnectCalendar = async () => {

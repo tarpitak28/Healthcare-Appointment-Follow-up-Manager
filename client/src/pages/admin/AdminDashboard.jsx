@@ -29,6 +29,13 @@ export default function AdminDashboard() {
   useEffect(() => {
     fetchDoctors();
     fetchAppointments();
+
+    // Real-Time Automated Frontend Syncing for Admin Dashboard (polls every 10 seconds)
+    const syncInterval = setInterval(() => {
+      fetchDoctors();
+      fetchAppointments();
+    }, 10000);
+    return () => clearInterval(syncInterval);
   }, []);
 
   const fetchDoctors = async () => {

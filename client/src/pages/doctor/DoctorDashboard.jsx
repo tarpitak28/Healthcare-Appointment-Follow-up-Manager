@@ -34,6 +34,11 @@ export default function DoctorDashboard() {
 
   useEffect(() => {
     fetchAppointments();
+    // Real-Time Automated Frontend Syncing for Doctor Consultations (polls every 10 seconds)
+    const syncInterval = setInterval(() => {
+      fetchAppointments();
+    }, 10000);
+    return () => clearInterval(syncInterval);
   }, []);
 
   const fetchAppointments = async () => {
