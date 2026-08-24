@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import AdminStatsRow from './components/AdminStatsRow';
 import AuditTable from './components/AuditTable';
+import BroadcastConsole from './components/BroadcastConsole';
 import {
   ShieldCheck,
   Calendar,
@@ -224,6 +225,17 @@ export default function AdminDashboard() {
                 }`}
               >
                 📋 Audit Log ({appointments.length})
+              </button>
+
+              <button
+                onClick={() => setActiveTab('broadcast')}
+                className={`px-4 py-2 rounded-xl transition whitespace-nowrap ${
+                  activeTab === 'broadcast'
+                    ? 'bg-indigo-600 text-white shadow-md'
+                    : 'text-slate-400 hover:bg-slate-900 hover:text-white'
+                }`}
+              >
+                📢 Broadcast Announcements
               </button>
             </nav>
           </div>
@@ -476,6 +488,11 @@ export default function AdminDashboard() {
             onCancelAppointment={handleCancelAppointment}
             isLoading={isLoadingAppointments}
           />
+        )}
+
+        {/* BROADCAST ANNOUNCEMENTS TAB */}
+        {activeTab === 'broadcast' && (
+          <BroadcastConsole />
         )}
       </main>
 

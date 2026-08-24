@@ -40,6 +40,7 @@ model User {
 	medicationReminders     MedicationReminder[]
 	slotHolds               SlotHold[]
 	notifications           NotificationLog[]
+	broadcastRecipients     BroadcastRecipient[]
 }
 
 model DoctorProfile {
@@ -166,6 +167,7 @@ enum NotificationType {
   POST_VISIT_SUMMARY
   MEDICATION_REMINDER
   SYSTEM_ALERT
+  SYSTEM_ANNOUNCEMENT
 }
 
 model NotificationLog {
@@ -193,6 +195,53 @@ model NotificationLog {
 
   @@index([status, nextAttemptAt])
   @@index([recipientUserId])
+}
+
+enum BroadcastAudience {
+  ALL_USERS
+  PATIENTS
+  DOCTORS
+  ADMINS
+}
+
+enum BroadcastStatus {
+  DRAFT
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model Broadcast {
+  id             String             @id @default(uuid())
+  title          String?
+  subject        String
+  message        String
+  audience       BroadcastAudience  @default(ALL_USERS)
+  status         BroadcastStatus    @default(QUEUED)
+  recipientCount Int                @default(0)
+  createdBy      String?
+  scheduledAt    DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  recipients     BroadcastRecipient[]
+}
+
+model BroadcastRecipient {
+  id                String          @id @default(uuid())
+  broadcastId       String
+  broadcast         Broadcast       @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+  userId            String
+  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notificationLogId String?
+  status            String          @default("QUEUED")
+  sentAt            DateTime?
+
+  createdAt         DateTime        @default(now())
+
+  @@unique([broadcastId, userId])
 }
 
 

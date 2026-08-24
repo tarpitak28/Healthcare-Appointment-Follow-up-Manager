@@ -272,10 +272,45 @@ async function cancelAppointment(req, res) {
 	}
 }
 
+async function sendBroadcast(req, res) {
+	try {
+		const { subject, message, audience } = req.body;
+
+		if (!subject || !message) {
+			return res.status(400).json({
+				success: false,
+				message: 'Subject and message body are required.',
+			});
+		}
+
+		const { createBroadcast } = require('../services/broadcastService');
+
+		const result = await createBroadcast({
+			subject: subject.trim(),
+			message: message.trim(),
+			audience: audience || 'ALL_USERS',
+			createdBy: req.user ? req.user.id : 'ADMIN',
+		});
+
+		res.status(201).json({
+			success: true,
+			message: 'Broadcast campaign queued successfully for execution.',
+			...result,
+		});
+	} catch (error) {
+		console.error('Send broadcast error:', error);
+		res.status(500).json({
+			success: false,
+			message: error.message || 'Server error creating broadcast campaign.',
+		});
+	}
+}
+
 module.exports = {
 	getAllDoctors,
 	createDoctor,
 	markDoctorLeave,
 	getAllAppointments,
 	cancelAppointment,
+	sendBroadcast,
 };

@@ -263,10 +263,49 @@ function medicationReminder({ patientName, medicineName, dosage, frequency, sche
   return wrapInBaseLayout({ title: `Medication Reminder: ${medicineName} — HealthPulse`, contentHtml });
 }
 
+/**
+ * 6. System Announcement Broadcast Email
+ */
+function systemAnnouncement({ recipientName, role, subject, message }) {
+  const ctaLabel = role === 'DOCTOR'
+    ? 'Open Doctor Dashboard'
+    : role === 'ADMIN'
+    ? 'Open Admin Console'
+    : 'Open Patient Dashboard';
+
+  const contentHtml = `
+    <h2 style="color: #818cf8; font-size: 18px; margin-top: 0;">📢 System Announcement</h2>
+    <p style="color: #cbd5e1; font-size: 14px; line-height: 1.5;">
+      Hello <strong>${recipientName}</strong>,
+    </p>
+    <p style="color: #e2e8f0; font-size: 14px; line-height: 1.6;">
+      ${message}
+    </p>
+
+    <div class="card" style="border-color: rgba(129, 140, 248, 0.3);">
+      <div class="meta-row">
+        <span class="meta-label">Notice Type</span>
+        <span class="meta-value">Hospital Platform Update</span>
+      </div>
+      <div class="meta-row">
+        <span class="meta-label">Recipient Persona</span>
+        <span class="meta-value">${role}</span>
+      </div>
+    </div>
+
+    <div style="text-align: center; margin-top: 24px;">
+      <a href="${process.env.CLIENT_URL || 'http://localhost:5173'}" class="btn-primary">${ctaLabel}</a>
+    </div>
+  `;
+
+  return wrapInBaseLayout({ title: subject || 'HealthPulse System Announcement', contentHtml });
+}
+
 module.exports = {
   bookingConfirmationPatient,
   bookingConfirmationDoctor,
   appointmentCancellation,
   doctorLeaveConflict,
   medicationReminder,
+  systemAnnouncement,
 };
