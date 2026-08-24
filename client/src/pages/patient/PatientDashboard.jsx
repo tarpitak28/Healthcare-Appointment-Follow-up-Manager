@@ -3,7 +3,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import API from '../../api/axios';
 import PatientLayout from './PatientLayout';
 import BookingWizard from './components/BookingWizard';
-import { getGoogleCalendarUrl, downloadICS } from '../../utils/calendar';
+import CarePlanCard from '../../components/CarePlanCard';
+import CalendarActions from '../../components/CalendarActions';
 import {
   Calendar,
   Clock,
@@ -11,11 +12,7 @@ import {
   CheckCircle2,
   FileText,
   Bell,
-  Trash2,
-  Download,
-  CalendarPlus,
   Activity,
-  AlertCircle,
 } from 'lucide-react';
 
 export default function PatientDashboard() {
@@ -257,105 +254,19 @@ export default function PatientDashboard() {
                     )}
                   </div>
 
-                  {/* Post Visit Summary */}
-                  {app.postVisitSummary && !app.needsHumanReview && (
-                    <div className="p-4 bg-emerald-950/40 border border-emerald-500/30 rounded-xl text-xs text-emerald-200 space-y-1">
-                      <strong className="block font-bold text-emerald-400 flex items-center space-x-1">
-                        <FileText className="w-4 h-4" />
-                        <span>AI Post-Visit Summary & Care Plan</span>
-                      </strong>
-                      {(() => {
-                        let summaryObj = app.postVisitSummary;
-                        if (typeof summaryObj === 'string') {
-                          try { summaryObj = JSON.parse(summaryObj); } catch (e) {}
-                        }
-                        if (typeof summaryObj === 'object' && summaryObj !== null && summaryObj.summary) {
-                          return (
-                            <div className="space-y-1 mt-1">
-                              <p>{summaryObj.summary}</p>
-                              {summaryObj.followUp && summaryObj.followUp !== 'Not specified by the doctor.' && (
-                                <p className="font-semibold text-emerald-300"><strong>Follow-Up:</strong> {summaryObj.followUp}</p>
-                              )}
-                            </div>
-                          );
-                        }
-                        return String(app.postVisitSummary);
-                      })()}
-                    </div>
-                  )}
+                  {/* Care Plan Card Component */}
+                  <CarePlanCard appointment={app} onReminderSaved={refetchReminders} />
 
-                  {/* Prescription Section */}
-                  {app.prescription && (
-                    <div className="p-4 bg-blue-950/40 border border-blue-500/30 rounded-xl text-xs text-blue-200 space-y-2">
-                      <strong className="block font-bold text-blue-400 flex items-center space-x-1">
-                        <Pill className="w-4 h-4" />
-                        <span>Doctor Prescription</span>
-                      </strong>
-                      {app.prescription.diagnosis && (
-                        <p><strong>Diagnosis:</strong> {app.prescription.diagnosis}</p>
-                      )}
-
-                      {app.prescription.medicines?.length > 0 && (
-                        <div className="space-y-1.5 mt-2">
-                          {app.prescription.medicines.map((med, idx) => (
-                            <div key={idx} className="flex items-center justify-between bg-slate-900 p-2.5 rounded-lg border border-slate-800">
-                              <span>
-                                <strong>{med.name}</strong> {med.dosage && `— ${med.dosage}`} {med.frequency && `(${med.frequency})`}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSelectedMedicine({ ...med, appointmentId: app.id });
-                                  setReminderStartDate(String(app.appointmentDate || '').slice(0, 10));
-                                  setReminderEndDate(String(app.appointmentDate || '').slice(0, 10));
-                                  setShowReminderModal(true);
-                                }}
-                                className="px-2.5 py-1 text-xs bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-md"
-                              >
-                                🔔 Set Reminder
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Actions */}
+                  {/* Calendar Actions Bar & Cancel Action */}
                   {app.status === 'BOOKED' && (
-                    <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-800">
-                      <a
-                        href={getGoogleCalendarUrl(
-                          app.doctorProfile?.user?.name || 'Doctor',
-                          app.appointmentDate,
-                          app.startTime,
-                          app.endTime,
-                          app.symptoms
-                        )}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-3 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 rounded-lg text-xs font-bold border border-blue-500/20 flex items-center space-x-1"
-                      >
-                        <CalendarPlus className="w-3.5 h-3.5" />
-                        <span>Google Calendar</span>
-                      </a>
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          downloadICS(
-                            app.doctorProfile?.user?.name || 'Doctor',
-                            app.appointmentDate,
-                            app.startTime,
-                            app.endTime,
-                            app.symptoms
-                          )
-                        }
-                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-bold flex items-center space-x-1"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>Download .ics Invite</span>
-                      </button>
+                    <div className="flex flex-wrap items-center justify-between pt-2 border-t border-slate-800 gap-2">
+                      <CalendarActions
+                        doctorName={app.doctorProfile?.user?.name || 'Doctor'}
+                        appointmentDate={app.appointmentDate}
+                        startTime={app.startTime}
+                        endTime={app.endTime}
+                        symptoms={app.symptoms}
+                      />
 
                       <button
                         type="button"
@@ -370,7 +281,7 @@ export default function PatientDashboard() {
                             setMessage(err.response?.data?.message || 'Failed to cancel appointment.');
                           }
                         }}
-                        className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-xs font-bold border border-red-500/20"
+                        className="px-3.5 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl text-xs font-bold border border-red-500/20 active:scale-95 transition"
                       >
                         Cancel Booking
                       </button>
