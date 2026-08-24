@@ -9,11 +9,20 @@ const calendarRoutes = require('./routes/calendarRoutes');
 
 const app = express();
 
-const allowedOrigin = process.env.CLIENT_URL || 'http://localhost:5173';
+const allowedOrigins = (process.env.CLIENT_URL || 'http://localhost:5173')
+  .split(',')
+  .map((o) => o.trim().replace(/\/$/, ''));
+
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || origin === allowedOrigin) {
+      if (!origin) return callback(null, true);
+      const cleanOrigin = origin.replace(/\/$/, '');
+      if (
+        allowedOrigins.includes(cleanOrigin) ||
+        /\.vercel\.app$/.test(cleanOrigin) ||
+        cleanOrigin.startsWith('http://localhost:')
+      ) {
         return callback(null, true);
       }
       return callback(new Error('CORS policy error: Origin not allowed'));
