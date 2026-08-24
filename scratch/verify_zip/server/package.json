@@ -1,0 +1,32 @@
+{
+	"name": "healthcare-backend",
+	"version": "1.0.0",
+	"main": "src/server.js",
+	"scripts": {
+		"start": "node src/server.js",
+		"dev": "nodemon src/server.js",
+		"test:db:reset": "npx prisma migrate deploy",
+		"test": "jest --runInBand --forceExit",
+		"test:coverage": "jest --coverage --runInBand --forceExit"
+	},
+	"dependencies": {
+		"@google/generative-ai": "^0.24.1",
+		"@prisma/client": "^5.22.0",
+		"bcryptjs": "^2.4.3",
+		"cors": "^2.8.5",
+		"dotenv": "^16.4.5",
+		"express": "^4.18.2",
+		"googleapis": "^133.0.0",
+		"ics": "^3.12.0",
+		"jsonwebtoken": "^9.0.2",
+		"node-cron": "^4.6.0",
+		"nodemailer": "^6.10.1",
+		"zod": "^4.4.3"
+	},
+	"devDependencies": {
+		"jest": "^30.4.2",
+		"nodemon": "^3.1.0",
+		"prisma": "^5.22.0",
+		"supertest": "^7.2.2"
+	}
+}
