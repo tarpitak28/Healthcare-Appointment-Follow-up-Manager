@@ -192,22 +192,24 @@ export default function PatientDashboard() {
 
   const handleSelectSlot = async (slot) => {
     if (!slot.isAvailable || !selectedDoctor || !selectedDate) return;
+    setSelectedSlot(slot);
+    setMessage(`Selected slot ${slot.startTime} - ${slot.endTime}. Enter symptoms below and click Confirm Booking.`);
     try {
       await API.post(`/patient/doctors/${selectedDoctor}/hold-slot`, {
         appointmentDate: selectedDate,
         startTime: slot.startTime,
       });
-      setSelectedSlot(slot);
-      setMessage(`Slot ${slot.startTime} reserved for 5 minutes! Enter your symptoms to confirm booking.`);
     } catch (err) {
-      setMessage(err.response?.data?.message || 'Failed to reserve slot. It may be held by another user.');
-      handleFetchSlots(selectedDoctor, selectedDate);
+      console.warn('Slot hold notice:', err.response?.data?.message || err.message);
     }
   };
 
   const handleBook = async (e) => {
     e.preventDefault();
-    if (!selectedSlot || !selectedDate || !selectedDoctor) return;
+    if (!selectedSlot || !selectedDate || !selectedDoctor) {
+      setMessage('Please select a doctor, appointment date, and available time slot.');
+      return;
+    }
     setLoading(true);
     setMessage('');
     try {
@@ -216,12 +218,13 @@ export default function PatientDashboard() {
         appointmentDate: selectedDate,
         startTime: selectedSlot.startTime,
         endTime: selectedSlot.endTime,
-        symptoms,
+        symptoms: symptoms || 'General Consultation',
       });
-      setMessage('Appointment booked successfully with AI pre-visit analysis!');
+      setMessage('✅ Appointment booked successfully with AI pre-visit analysis!');
       setSymptoms('');
       setSelectedSlot(null);
       fetchAppointments();
+      handleFetchSlots(selectedDoctor, selectedDate);
     } catch (err) {
       setMessage(err.response?.data?.message || 'Booking failed');
     } finally {
@@ -331,12 +334,12 @@ export default function PatientDashboard() {
                         type="button"
                         disabled={!slot.isAvailable}
                         onClick={() => handleSelectSlot(slot)}
-                        className={`py-2 text-sm rounded-lg border font-medium ${
+                        className={`py-2 text-sm rounded-lg border font-medium transition-all ${
                           !slot.isAvailable
                             ? 'bg-slate-100 text-slate-400 cursor-not-allowed line-through'
                             : selectedSlot?.startTime === slot.startTime
-                            ? 'bg-indigo-600 text-white'
-                            : 'bg-white text-indigo-600 border-indigo-600 hover:bg-indigo-50'
+                            ? 'bg-indigo-600 text-white border-indigo-700 ring-2 ring-indigo-500 shadow-md font-bold scale-105'
+                            : 'bg-white text-indigo-600 border-indigo-300 hover:bg-indigo-50 hover:border-indigo-500'
                         }`}
                       >
                         {slot.startTime}
