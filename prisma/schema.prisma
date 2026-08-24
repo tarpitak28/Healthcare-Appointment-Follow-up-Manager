@@ -156,6 +156,7 @@ enum NotificationStatus {
   PROCESSING
   SENT
   FAILED
+  dead
 }
 
 enum NotificationType {
@@ -164,6 +165,7 @@ enum NotificationType {
   DOCTOR_LEAVE_CANCELLATION
   POST_VISIT_SUMMARY
   MEDICATION_REMINDER
+  SYSTEM_ALERT
 }
 
 model NotificationLog {
