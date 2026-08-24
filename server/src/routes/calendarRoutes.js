@@ -5,10 +5,16 @@ const prisma = require('../config/db');
 const { verifyToken } = require('../middleware/authMiddleware');
 
 // Initialize the OAuth2 client
+const defaultRedirectUri = process.env.NODE_ENV === 'production'
+  ? 'https://careconect-api.onrender.com/api/calendar/auth/google/callback'
+  : 'http://localhost:5000/api/calendar/auth/google/callback';
+
+const redirectUri = process.env.GOOGLE_REDIRECT_URI || defaultRedirectUri;
+
 const oauth2Client = new google.auth.OAuth2(
   process.env.GOOGLE_CLIENT_ID,
   process.env.GOOGLE_CLIENT_SECRET,
-  process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5000/api/auth/google/callback'
+  redirectUri
 );
 
 // 1. Route to generate the Google Login link
