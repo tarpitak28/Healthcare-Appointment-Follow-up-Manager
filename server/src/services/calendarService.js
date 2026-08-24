@@ -23,6 +23,24 @@ async function getAuthenticatedClient(userId) {
 		expiry_date: new Date(tokenRecord.expiresAt).getTime(),
 	});
 
+	// Persist silently refreshed tokens to database
+	oauth2Client.on('tokens', async (tokens) => {
+		if (tokens.access_token) {
+			try {
+				await prisma.googleToken.update({
+					where: { userId },
+					data: {
+						accessToken: tokens.access_token,
+						...(tokens.expiry_date && { expiresAt: new Date(tokens.expiry_date) }),
+						...(tokens.refresh_token && { refreshToken: tokens.refresh_token }),
+					},
+				});
+			} catch (err) {
+				console.error(`Failed to persist refreshed Google token for user ${userId}:`, err.message);
+			}
+		}
+	});
+
 	return oauth2Client;
 }
 

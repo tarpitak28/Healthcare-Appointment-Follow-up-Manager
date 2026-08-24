@@ -3,6 +3,7 @@ const { generatePreVisitSummary } = require('../services/llmService');
 const { sendEmail } = require('../utils/emailService');
 const { generateIcsFile } = require('../utils/icsGenerator');
 const { createCalendarEvent, deleteCalendarEvent } = require('../services/calendarService');
+const { createAndSendNotification } = require('../services/notificationService');
 
 // Search doctors by specialisation or view all
 async function searchDoctors(req, res) {
@@ -119,17 +120,39 @@ async function getAvailableSlots(req, res) {
 					gte: startOfDay,
 					lte: endOfDay,
 				},
-				status: 'BOOKED',
+				status: { in: ['BOOKED', 'COMPLETED'] },
 			},
 			select: { startTime: true },
 		});
 
+		// 4. Fetch active non-expired slot holds for this doctor on this date
+		const activeHolds = await prisma.slotHold.findMany({
+			where: {
+				doctorProfileId: doctorId,
+				appointmentDate: {
+					gte: startOfDay,
+					lte: endOfDay,
+				},
+				expiresAt: { gte: new Date() },
+			},
+			select: { startTime: true, patientId: true },
+		});
+
+		const currentUserId = req.user ? req.user.id : null;
 		const bookedTimes = new Set(bookedAppointments.map((app) => app.startTime));
 
-		// 4. Filter out booked slots
+		// A slot held by ANOTHER patient is unavailable. Held by current user is available for booking.
+		const heldByOthers = new Set(
+			activeHolds
+				.filter((h) => h.patientId !== currentUserId)
+				.map((h) => h.startTime)
+		);
+
+		// 5. Filter out booked and held slots
 		const availableSlots = allSlots.map((slot) => ({
 			...slot,
-			isAvailable: !bookedTimes.has(slot.startTime),
+			isAvailable: !bookedTimes.has(slot.startTime) && !heldByOthers.has(slot.startTime),
+			isHeldByMe: activeHolds.some((h) => h.startTime === slot.startTime && h.patientId === currentUserId),
 		}));
 
 		res.status(200).json({ success: true, date, slots: availableSlots });
@@ -471,11 +494,14 @@ async function bookAppointment(req, res) {
 			});
 
 			if (patientUser?.email) {
-				await sendEmail({
-					to: patientUser.email,
+				await createAndSendNotification({
+					recipientUserId: patientId,
+					type: 'BOOKING_CONFIRMATION',
+					appointmentId: appointment.id,
 					subject: 'Appointment Confirmation & Calendar Invite',
-					text: `Your appointment is confirmed for ${appointmentDate} from ${startTime} to ${endTime}.`,
-					calendarInvite: icsContent,
+					bodyText: `Your appointment is confirmed for ${appointmentDate} from ${startTime} to ${endTime}.`,
+					eventKey: `${appointment.id}:BOOKING_CONFIRMATION`,
+					attachments: icsContent,
 				});
 			}
 		} catch (emailErr) {
@@ -483,6 +509,20 @@ async function bookAppointment(req, res) {
 				'Email trigger failed:',
 				emailErr.message
 			);
+		}
+
+		// Clean up active slot hold
+		try {
+			await prisma.slotHold.deleteMany({
+				where: {
+					doctorProfileId,
+					patientId,
+					appointmentDate: startOfDay,
+					startTime,
+				},
+			});
+		} catch (holdErr) {
+			// Silent cleanup
 		}
 
 		return res.status(201).json({
@@ -493,8 +533,8 @@ async function bookAppointment(req, res) {
 	} catch (error) {
 		console.error('Booking error:', error);
 
-		// Prisma unique constraint violation
-		if (error.code === 'P2002') {
+		// Prisma unique constraint violation or Postgres 23505
+		if (error.code === 'P2002' || (error.message && (error.message.includes('23505') || error.message.includes('unique_active_doctor_slot')))) {
 			return res.status(409).json({
 				success: false,
 				message:
@@ -574,13 +614,16 @@ async function cancelAppointment(req, res) {
 			);
 		}
 
-		// Send cancellation email
-		await sendEmail({
-			to: appointment.patient.email,
+		// Send cancellation email via NotificationService
+		await createAndSendNotification({
+			recipientUserId: patientId,
+			type: 'APPOINTMENT_CANCELLATION',
+			appointmentId: appointment.id,
 			subject: 'Appointment Cancelled',
-			text: `Your appointment with Dr. ${appointment.doctorProfile.user.name} on ${new Date(
+			bodyText: `Your appointment with Dr. ${appointment.doctorProfile.user.name} on ${new Date(
 				appointment.appointmentDate
 			).toLocaleDateString()} at ${appointment.startTime} has been cancelled.`,
+			eventKey: `${appointment.id}:APPOINTMENT_CANCELLATION`,
 		});
 
 		res.json({
@@ -597,10 +640,112 @@ async function cancelAppointment(req, res) {
 	}
 }
 
+// Hold/reserve a slot for 5 minutes
+async function holdSlot(req, res) {
+	try {
+		const doctorProfileId = req.params.doctorId || req.params.id;
+		const { appointmentDate, startTime } = req.body;
+		const patientId = req.user.id;
+
+		if (!doctorProfileId || !appointmentDate || !startTime) {
+			return res.status(400).json({
+				success: false,
+				message: 'Doctor, appointment date, and start time are required.',
+			});
+		}
+
+		const startOfDay = new Date(`${appointmentDate}T00:00:00.000Z`);
+		const endOfDay = new Date(`${appointmentDate}T23:59:59.999Z`);
+
+		// Check doctor leave
+		const leave = await prisma.doctorLeave.findFirst({
+			where: {
+				doctorProfileId,
+				startDate: { lte: endOfDay },
+				endDate: { gte: startOfDay },
+			},
+		});
+
+		if (leave) {
+			return res.status(400).json({
+				success: false,
+				message: 'Doctor is on leave on the selected date.',
+			});
+		}
+
+		// Check existing BOOKED/COMPLETED appointment
+		const existingBooking = await prisma.appointment.findFirst({
+			where: {
+				doctorProfileId,
+				appointmentDate: startOfDay,
+				startTime,
+				status: { in: ['BOOKED', 'COMPLETED'] },
+			},
+		});
+
+		if (existingBooking) {
+			return res.status(409).json({
+				success: false,
+				message: 'This time slot is already booked. Please choose another slot.',
+			});
+		}
+
+		// Check if held by another patient
+		const existingHold = await prisma.slotHold.findFirst({
+			where: {
+				doctorProfileId,
+				appointmentDate: startOfDay,
+				startTime,
+				expiresAt: { gte: new Date() },
+			},
+		});
+
+		if (existingHold && existingHold.patientId !== patientId) {
+			return res.status(409).json({
+				success: false,
+				message: 'This slot is currently held by another patient. Please select another slot.',
+			});
+		}
+
+		const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+		const slotHold = await prisma.slotHold.upsert({
+			where: {
+				doctorProfileId_appointmentDate_startTime: {
+					doctorProfileId,
+					appointmentDate: startOfDay,
+					startTime,
+				},
+			},
+			update: {
+				patientId,
+				expiresAt,
+			},
+			create: {
+				doctorProfileId,
+				patientId,
+				appointmentDate: startOfDay,
+				startTime,
+				expiresAt,
+			},
+		});
+
+		res.status(201).json({
+			success: true,
+			message: 'Slot held successfully for 5 minutes',
+			slotHold,
+		});
+	} catch (error) {
+		console.error('Hold slot error:', error);
+		res.status(500).json({ success: false, message: 'Server error holding slot' });
+	}
+}
+
 module.exports = {
 	searchDoctors,
 	getAvailableSlots,
 	bookAppointment,
 	getPatientAppointments,
 	cancelAppointment,
+	holdSlot,
 };

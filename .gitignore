@@ -2,3 +2,15 @@ node_modules/
 .env
 NUL
 client/NUL
+
+# Documentation & Analysis files
+doc/
+docs/
+implement.md
+components.md
+componenets.md
+architecture.md
+ai_context.md
+workflow.md
+
+

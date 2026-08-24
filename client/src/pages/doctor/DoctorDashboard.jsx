@@ -227,9 +227,38 @@ export default function DoctorDashboard() {
                         Cancelled
                       </span>
                     ) : (
-                      <span className="px-3 py-1 bg-emerald-50 text-emerald-600 text-xs rounded-full font-medium">
-                        Completed
-                      </span>
+                      <div className="flex flex-col items-end gap-2">
+                        <span className="px-3 py-1 bg-emerald-50 text-emerald-600 text-xs rounded-full font-medium">
+                          Completed
+                        </span>
+                        {app.needsHumanReview && (
+                          <div className="text-right">
+                            <span className="inline-block px-2.5 py-1 bg-amber-50 text-amber-700 border border-amber-200 text-xs rounded-lg font-semibold mb-1">
+                              ⚠️ Pending Review
+                            </span>
+                            {app.reviewReasons?.length > 0 && (
+                              <p className="text-xs text-amber-600 max-w-xs">
+                                Flagged: {Array.isArray(app.reviewReasons) ? app.reviewReasons.join('; ') : String(app.reviewReasons)}
+                              </p>
+                            )}
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  await API.post(`/doctor/appointments/${app.id}/approve-summary`);
+                                  setMessage('Post-visit summary approved successfully!');
+                                  fetchAppointments();
+                                } catch (err) {
+                                  setMessage(err.response?.data?.message || 'Failed to approve summary');
+                                }
+                              }}
+                              className="mt-1 px-3 py-1 bg-amber-600 text-white rounded text-xs font-semibold hover:bg-amber-700"
+                            >
+                              Approve Summary
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import API from '../../api/axios';
 import { useAuth } from '../../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import { getGoogleCalendarUrl, downloadICS } from '../../utils/calendar';
 
 export default function PatientDashboard() {
   const { user, logout } = useAuth();
@@ -80,32 +81,18 @@ export default function PatientDashboard() {
     }
 
     try {
-      const token = localStorage.getItem('token');
+      const response = await API.post('/medications', {
+        appointmentId: selectedMedicine.appointmentId,
+        medicineName: selectedMedicine.name,
+        dosage: selectedMedicine.dosage,
+        frequency: selectedMedicine.frequency,
+        reminderTimes,
+        startDate: reminderStartDate,
+        endDate: reminderEndDate,
+      });
 
-      const response = await fetch(
-        'http://localhost:5000/api/medications',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            appointmentId: selectedMedicine.appointmentId,
-            medicineName: selectedMedicine.name,
-            dosage: selectedMedicine.dosage,
-            frequency: selectedMedicine.frequency,
-            reminderTimes,
-            startDate: reminderStartDate,
-            endDate: reminderEndDate,
-          }),
-        }
-      );
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Failed to save reminder');
+      if (!response.data.success) {
+        throw new Error(response.data.message || 'Failed to save reminder');
       }
 
       alert('Medication reminder saved successfully!');
@@ -119,7 +106,7 @@ export default function PatientDashboard() {
       fetchMedicationReminders();
     } catch (error) {
       console.error('Save reminder error:', error);
-      alert(error.message);
+      alert(error.response?.data?.message || error.message);
     }
   };
 
@@ -180,6 +167,21 @@ export default function PatientDashboard() {
       setSlots(fetchedSlots);
     } catch (err) {
       console.error('Error fetching slots', err);
+    }
+  };
+
+  const handleSelectSlot = async (slot) => {
+    if (!slot.isAvailable || !selectedDoctor || !selectedDate) return;
+    try {
+      await API.post(`/patient/doctors/${selectedDoctor}/hold-slot`, {
+        appointmentDate: selectedDate,
+        startTime: slot.startTime,
+      });
+      setSelectedSlot(slot);
+      setMessage(`Slot ${slot.startTime} reserved for 5 minutes! Enter your symptoms to confirm booking.`);
+    } catch (err) {
+      setMessage(err.response?.data?.message || 'Failed to reserve slot. It may be held by another user.');
+      handleFetchSlots(selectedDoctor, selectedDate);
     }
   };
 
@@ -309,7 +311,7 @@ export default function PatientDashboard() {
                         key={idx}
                         type="button"
                         disabled={!slot.isAvailable}
-                        onClick={() => setSelectedSlot(slot)}
+                        onClick={() => handleSelectSlot(slot)}
                         className={`py-2 text-sm rounded-lg border font-medium ${
                           !slot.isAvailable
                             ? 'bg-slate-100 text-slate-400 cursor-not-allowed line-through'
@@ -374,9 +376,26 @@ export default function PatientDashboard() {
                         <strong>AI Urgency:</strong> {app.urgencyLevel} | <strong>Chief Complaint:</strong> {app.chiefComplaint}
                       </div>
                     )}
-                    {app.postVisitSummary && (
-                      <div className="text-xs bg-emerald-50 text-emerald-700 p-2 rounded">
-                        <strong>Post-Visit Summary:</strong> {app.postVisitSummary}
+                    {app.postVisitSummary && !app.needsHumanReview && (
+                      <div className="text-xs bg-emerald-50 text-emerald-800 p-3 rounded-lg border border-emerald-200 mt-2">
+                        <strong className="block text-emerald-900 font-semibold mb-1">Post-Visit Summary</strong>
+                        {(() => {
+                          let summaryObj = app.postVisitSummary;
+                          if (typeof summaryObj === 'string') {
+                            try { summaryObj = JSON.parse(summaryObj); } catch (e) {}
+                          }
+                          if (typeof summaryObj === 'object' && summaryObj !== null && summaryObj.summary) {
+                            return (
+                              <div className="space-y-1">
+                                <p>{summaryObj.summary}</p>
+                                {summaryObj.followUp && summaryObj.followUp !== 'Not specified by the doctor.' && (
+                                  <p className="font-medium text-emerald-900"><strong>Follow-Up:</strong> {summaryObj.followUp}</p>
+                                )}
+                              </div>
+                            );
+                          }
+                          return String(app.postVisitSummary);
+                        })()}
                       </div>
                     )}
 
@@ -441,39 +460,72 @@ export default function PatientDashboard() {
                       </div>
                     )}
                     {app.status === 'BOOKED' && (
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const confirmed = window.confirm(
-                            `Cancel your appointment on ${String(app.appointmentDate).split('T')[0].split('-').reverse().join('/')} at ${app.startTime}?`
-                          );
+                      <div className="flex flex-wrap gap-2 pt-2">
+                        <a
+                          href={getGoogleCalendarUrl(
+                            app.doctorProfile?.user?.name || 'Doctor',
+                            app.appointmentDate,
+                            app.startTime,
+                            app.endTime,
+                            app.symptoms
+                          )}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-semibold hover:bg-blue-100 flex items-center gap-1"
+                        >
+                          📅 Add to Google Calendar
+                        </a>
 
-                          if (!confirmed) return;
-
-                          try {
-                            await API.delete(
-                              `/patient/appointments/${app.id}`
-                            );
-
-                            setMessage('Appointment cancelled successfully.');
-
-                            // Refresh appointments and slots
-                            fetchAppointments();
-
-                            if (selectedDoctor && selectedDate) {
-                              handleFetchSlots(selectedDoctor, selectedDate);
-                            }
-                          } catch (err) {
-                            setMessage(
-                              err.response?.data?.message ||
-                                'Failed to cancel appointment.'
-                            );
+                        <button
+                          type="button"
+                          onClick={() =>
+                            downloadICS(
+                              app.doctorProfile?.user?.name || 'Doctor',
+                              app.appointmentDate,
+                              app.startTime,
+                              app.endTime,
+                              app.symptoms
+                            )
                           }
-                        }}
-                        className="px-3 py-2 bg-red-50 text-red-600 rounded-lg text-sm font-medium hover:bg-red-100"
-                      >
-                        Cancel Appointment
-                      </button>
+                          className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-200 flex items-center gap-1"
+                        >
+                          📥 Download .ics Invite
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const confirmed = window.confirm(
+                              `Cancel your appointment on ${String(app.appointmentDate).split('T')[0].split('-').reverse().join('/')} at ${app.startTime}?`
+                            );
+
+                            if (!confirmed) return;
+
+                            try {
+                              await API.delete(
+                                `/patient/appointments/${app.id}`
+                              );
+
+                              setMessage('Appointment cancelled successfully.');
+
+                              // Refresh appointments and slots
+                              fetchAppointments();
+
+                              if (selectedDoctor && selectedDate) {
+                                handleFetchSlots(selectedDoctor, selectedDate);
+                              }
+                            } catch (err) {
+                              setMessage(
+                                err.response?.data?.message ||
+                                  'Failed to cancel appointment.'
+                              );
+                            }
+                          }}
+                          className="px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-xs font-semibold hover:bg-red-100"
+                        >
+                          Cancel Appointment
+                        </button>
+                      </div>
                     )}
                   </div>
                 ))

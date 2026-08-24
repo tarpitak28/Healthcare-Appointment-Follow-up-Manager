@@ -1,6 +1,7 @@
 const prisma = require('../config/db');
 const bcrypt = require('bcryptjs');
 const { sendEmail } = require('../services/emailService');
+const { createAndSendNotification } = require('../services/notificationService');
 
 // Get all doctors and their profiles
 async function getAllDoctors(req, res) {
@@ -77,36 +78,42 @@ async function createDoctor(req, res) {
 	}
 }
 
-// Mark doctor on leave and cancel conflicting bookings for one date
+// Mark doctor on leave and cancel conflicting bookings across date range
 async function markDoctorLeave(req, res) {
   try {
     const doctorId = req.params.doctorId || req.params.doctorProfileId;
-    const { date, reason } = req.body;
+    const { startDate, endDate, date, reason } = req.body;
 
-    if (!date) {
-      return res.status(400).json({ success: false, message: 'Date is required' });
+    const startStr = startDate || date;
+    const endStr = endDate || startDate || date;
+
+    if (!startStr) {
+      return res.status(400).json({ success: false, message: 'Start date is required' });
     }
 
-    const leaveDate = new Date(date);
-    const endOfDay = new Date(date);
-    endOfDay.setHours(23, 59, 59, 999);
+    const startOfDay = new Date(`${startStr}T00:00:00.000Z`);
+    const endOfDay = new Date(`${endStr}T23:59:59.999Z`);
+
+    if (endOfDay < startOfDay) {
+      return res.status(400).json({ success: false, message: 'End date cannot be before start date' });
+    }
 
     // Create leave record using startDate and endDate matching schema
     const leave = await prisma.doctorLeave.create({
       data: {
         doctorProfileId: doctorId,
-        startDate: leaveDate,
+        startDate: startOfDay,
         endDate: endOfDay,
         reason: reason || 'Scheduled Leave',
       },
     });
 
-    // Find and cancel conflicting appointments on this date
+    // Find and cancel conflicting appointments across the full leave range
     const conflictingAppointments = await prisma.appointment.findMany({
       where: {
         doctorProfileId: doctorId,
         appointmentDate: {
-          gte: leaveDate,
+          gte: startOfDay,
           lte: endOfDay,
         },
         status: 'BOOKED',
@@ -122,20 +129,20 @@ async function markDoctorLeave(req, res) {
       });
 
       for (const app of conflictingAppointments) {
-        const patient = await prisma.user.findUnique({ where: { id: app.patientId } });
-        if (patient) {
-          await sendEmail({
-            to: patient.email,
-            subject: 'Appointment Cancelled - Doctor on Leave',
-            text: `Your appointment on ${new Date(app.appointmentDate).toLocaleDateString()} has been cancelled because the doctor is on leave.`,
-          });
-        }
+        await createAndSendNotification({
+          recipientUserId: app.patientId,
+          type: 'DOCTOR_LEAVE_CANCELLATION',
+          appointmentId: app.id,
+          subject: 'Appointment Cancelled - Doctor on Leave',
+          bodyText: `Your appointment on ${new Date(app.appointmentDate).toLocaleDateString()} has been cancelled because the doctor is scheduled on leave.`,
+          eventKey: `${app.id}:DOCTOR_LEAVE_CANCELLATION`,
+        });
       }
     }
 
     res.status(200).json({
       success: true,
-      message: `Leave marked successfully for ${date}!`,
+      message: `Leave marked successfully from ${startStr} to ${endStr}!`,
       affectedAppointmentsCount: appointmentIds.length,
       leave,
     });

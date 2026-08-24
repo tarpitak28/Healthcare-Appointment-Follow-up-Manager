@@ -8,7 +8,8 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const [doctors, setDoctors] = useState([]);
   const [appointments, setAppointments] = useState([]);
-  const [leaveDate, setLeaveDate] = useState('');
+  const [leaveStartDate, setLeaveStartDate] = useState('');
+  const [leaveEndDate, setLeaveEndDate] = useState('');
   const [selectedDocId, setSelectedDocId] = useState('');
   const [message, setMessage] = useState('');
 
@@ -67,14 +68,16 @@ export default function AdminDashboard() {
 
   const handleMarkLeave = async (e) => {
     e.preventDefault();
-    if (!selectedDocId || !leaveDate) return;
+    if (!selectedDocId || !leaveStartDate) return;
     try {
       const res = await API.post(`/admin/doctors/${selectedDocId}/leave`, {
-        date: leaveDate,
+        startDate: leaveStartDate,
+        endDate: leaveEndDate || leaveStartDate,
         reason: 'Scheduled Leave',
       });
       setMessage(`Leave marked successfully! ${res.data.affectedAppointmentsCount} conflicting bookings were automatically cancelled.`);
-      setLeaveDate('');
+      setLeaveStartDate('');
+      setLeaveEndDate('');
       fetchDoctors();
     } catch (err) {
       setMessage(err.response?.data?.message || 'Failed to mark leave');
@@ -150,16 +153,34 @@ export default function AdminDashboard() {
                 </select>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Leave Date</label>
-                <input
-                  type="date"
-                  min={todayStr}
-                  className="w-full px-4 py-2 border rounded-lg outline-none"
-                  value={leaveDate}
-                  onChange={(e) => setLeaveDate(e.target.value)}
-                  required
-                />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Start Date</label>
+                  <input
+                    type="date"
+                    min={todayStr}
+                    className="w-full px-4 py-2 border rounded-lg outline-none"
+                    value={leaveStartDate}
+                    onChange={(e) => {
+                      setLeaveStartDate(e.target.value);
+                      if (!leaveEndDate || e.target.value > leaveEndDate) {
+                        setLeaveEndDate(e.target.value);
+                      }
+                    }}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">End Date</label>
+                  <input
+                    type="date"
+                    min={leaveStartDate || todayStr}
+                    className="w-full px-4 py-2 border rounded-lg outline-none"
+                    value={leaveEndDate}
+                    onChange={(e) => setLeaveEndDate(e.target.value)}
+                    required
+                  />
+                </div>
               </div>
 
               <button

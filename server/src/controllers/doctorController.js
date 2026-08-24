@@ -2,6 +2,7 @@ const prisma = require('../config/db');
 const { generatePostVisitSummary } = require('../services/llmService');
 const { sendEmail } = require('../utils/emailService');
 const { deleteCalendarEvent } = require('../services/calendarService');
+const { createAndSendNotification } = require('../services/notificationService');
 
 // Get doctor's appointments
 async function getDoctorAppointments(req, res) {
@@ -62,8 +63,10 @@ async function submitPostVisitNotes(req, res) {
 			return res.status(404).json({ success: false, message: 'Appointment not found or unauthorized' });
 		}
 
-		// Generate AI Post-Visit Summary
-		const postVisitSummary = await generatePostVisitSummary(clinicalNotes);
+		// Generate AI Post-Visit Summary with zero-hallucination guardrail
+		const summaryData = await generatePostVisitSummary(clinicalNotes, prescription);
+		const needsHumanReview = typeof summaryData === 'object' && summaryData !== null ? Boolean(summaryData.needsHumanReview) : false;
+		const reviewReasons = typeof summaryData === 'object' && summaryData !== null ? (summaryData.reviewReasons || []) : [];
 
 		// Update appointment
 		const updatedAppointment = await prisma.appointment.update({
@@ -71,13 +74,29 @@ async function submitPostVisitNotes(req, res) {
 			data: {
 				clinicalNotes,
 				prescription: prescription || {},
-				postVisitSummary,
+				postVisitSummary: typeof summaryData === 'string' ? summaryData : JSON.stringify(summaryData),
+				needsHumanReview,
+				reviewReasons,
 				status: 'COMPLETED',
 			},
 			include: {
 				patient: { select: { id: true, name: true, email: true } },
 			},
 		});
+
+		// Dispatch post-visit notification via NotificationService (failure does not break completion)
+		try {
+			await createAndSendNotification({
+				recipientUserId: appointment.patientId,
+				type: 'POST_VISIT_SUMMARY',
+				appointmentId: appointment.id,
+				subject: 'Your Post-Visit Summary is Ready',
+				bodyText: `Dr. ${doctorProfile.user?.name || 'your doctor'} has completed your consultation. Please sign in to your patient portal to review your post-visit summary and prescription details.`,
+				eventKey: `${appointment.id}:POST_VISIT_SUMMARY`,
+			});
+		} catch (notifErr) {
+			// Soft failure
+		}
 
 		res.status(200).json({
 			success: true,
@@ -87,6 +106,48 @@ async function submitPostVisitNotes(req, res) {
 	} catch (error) {
 		console.error('Submit post-visit error:', error);
 		res.status(500).json({ success: false, message: 'Server error submitting post-visit notes' });
+	}
+}
+
+// Doctor approves a flagged post-visit summary
+async function approvePostVisitSummary(req, res) {
+	try {
+		const { appointmentId } = req.params;
+		const userId = req.user.id;
+
+		const doctorProfile = await prisma.doctorProfile.findUnique({
+			where: { userId },
+		});
+
+		if (!doctorProfile) {
+			return res.status(404).json({ success: false, message: 'Doctor profile not found' });
+		}
+
+		const appointment = await prisma.appointment.findUnique({
+			where: { id: appointmentId },
+		});
+
+		if (!appointment || appointment.doctorProfileId !== doctorProfile.id) {
+			return res.status(404).json({ success: false, message: 'Appointment not found or unauthorized' });
+		}
+
+		const updatedAppointment = await prisma.appointment.update({
+			where: { id: appointmentId },
+			data: {
+				needsHumanReview: false,
+			},
+		});
+
+		console.log(`[Audit] Doctor ${userId} approved flagged post-visit summary for appointment ${appointmentId} at ${new Date().toISOString()}`);
+
+		res.status(200).json({
+			success: true,
+			message: 'Post-visit summary approved successfully',
+			appointment: updatedAppointment,
+		});
+	} catch (error) {
+		console.error('Approve post-visit summary error:', error);
+		res.status(500).json({ success: false, message: 'Server error approving summary' });
 	}
 }
 
@@ -178,5 +239,6 @@ async function cancelDoctorAppointment(req, res) {
 module.exports = {
 	getDoctorAppointments,
 	submitPostVisitNotes,
+	approvePostVisitSummary,
 	cancelDoctorAppointment,
 };
