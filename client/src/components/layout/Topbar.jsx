@@ -47,7 +47,8 @@ export default function Topbar({ title, subtitle, onOpenDrawer }) {
     try {
       setCalendarLoading(true);
       const userId = user?.id || '';
-      const res = await API.get(`/calendar/auth-url?userId=${userId}`);
+      const returnPath = location.pathname || '/';
+      const res = await API.get(`/calendar/auth-url?userId=${userId}&returnPath=${encodeURIComponent(returnPath)}`);
       if (res.data && res.data.url) {
         window.location.href = res.data.url;
       }

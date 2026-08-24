@@ -14,11 +14,14 @@ const oauth2Client = new google.auth.OAuth2(
 // 1. Route to generate the Google Login link
 router.get('/auth-url', (req, res) => {
   const userId = req.query.userId || req.query.state || '';
+  const returnPath = req.query.returnPath || '';
+  const statePayload = JSON.stringify({ userId, returnPath });
+
   const url = oauth2Client.generateAuthUrl({
     access_type: 'offline', // Required to get a refresh token
-    prompt: 'consent',      // Forces the consent screen every time for testing
+    prompt: 'consent',      // Forces the consent screen every time
     scope: ['https://www.googleapis.com/auth/calendar', 'https://www.googleapis.com/auth/calendar.events'],
-    state: userId,
+    state: Buffer.from(statePayload).toString('base64'),
   });
   res.json({ url });
 });
@@ -78,20 +81,34 @@ router.get('/auth/google/callback', async (req, res) => {
   const { code, state } = req.query;
 
   try {
+    let userId = '';
+    let returnPath = '';
+
+    if (state) {
+      try {
+        const decodedStr = Buffer.from(state, 'base64').toString('utf-8');
+        const parsed = JSON.parse(decodedStr);
+        userId = parsed.userId || '';
+        returnPath = parsed.returnPath || '';
+      } catch (e) {
+        userId = state;
+      }
+    }
+
     // Swap the code for actual tokens
     const { tokens } = await oauth2Client.getToken(code);
-    console.log('SUCCESS! Google Tokens Acquired:', tokens);
+    console.log('SUCCESS! Google Tokens Acquired for user:', userId);
 
-    if (state && state.trim() !== '') {
+    if (userId && userId.trim() !== '') {
       await prisma.googleToken.upsert({
-        where: { userId: state },
+        where: { userId },
         update: {
           accessToken: tokens.access_token,
           ...(tokens.refresh_token && { refreshToken: tokens.refresh_token }),
           expiresAt: new Date(tokens.expiry_date || Date.now() + 3600 * 1000),
         },
         create: {
-          userId: state,
+          userId: userId,
           accessToken: tokens.access_token,
           refreshToken: tokens.refresh_token || 'offline_refresh_token',
           expiresAt: new Date(tokens.expiry_date || Date.now() + 3600 * 1000),
@@ -99,11 +116,14 @@ router.get('/auth/google/callback', async (req, res) => {
       });
     }
 
-    const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
-    res.redirect(`${clientUrl}?google=connected`);
+    const clientUrl = (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/$/, '');
+    const redirectTarget = returnPath ? `${clientUrl}${returnPath}` : clientUrl;
+    const finalUrl = redirectTarget.includes('?') ? `${redirectTarget}&google=connected` : `${redirectTarget}?google=connected`;
+
+    res.redirect(finalUrl);
   } catch (error) {
     console.error('Error exchanging code for tokens:', error);
-    const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+    const clientUrl = (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/$/, '');
     res.redirect(`${clientUrl}?google=error`);
   }
 });
