@@ -4,6 +4,7 @@ const { sendEmail } = require('../utils/emailService');
 const { generateIcsFile } = require('../utils/icsGenerator');
 const { createCalendarEvent, deleteCalendarEvent } = require('../services/calendarService');
 const { createAndSendNotification } = require('../services/notificationService');
+const emailTemplates = require('../utils/emailTemplates');
 
 // Search doctors by specialisation or view all
 async function searchDoctors(req, res) {
@@ -493,27 +494,50 @@ async function bookAppointment(req, res) {
 				date: new Date(`${appointmentDate}T00:00:00.000Z`),
 			});
 
-			// 1. Dispatch Notification to Patient
+			// 1. Dispatch HTML Notification to Patient
 			if (patientUser?.email) {
+				const patientHtml = emailTemplates.bookingConfirmationPatient({
+					patientName: patientUser.name,
+					doctorName: doctorUser?.name || 'Doctor',
+					specialization: doctorProfile.specialisation,
+					appointmentDate,
+					startTime,
+					endTime,
+					symptoms: symptoms.trim(),
+				});
+
 				await createAndSendNotification({
 					recipientUserId: patientId,
 					type: 'BOOKING_CONFIRMATION',
 					appointmentId: appointment.id,
 					subject: 'Appointment Confirmation & Calendar Invite — HealthPulse',
 					bodyText: `Your appointment with Dr. ${doctorUser?.name || 'Doctor'} is confirmed for ${appointmentDate} from ${startTime} to ${endTime}.`,
+					bodyHtml: patientHtml,
 					eventKey: `${appointment.id}:PATIENT_BOOKING_CONFIRMATION`,
 					attachments: icsContent,
 				});
 			}
 
-			// 2. Dispatch Notification to Doctor
+			// 2. Dispatch HTML Notification to Doctor
 			if (doctorUser?.id) {
+				const doctorHtml = emailTemplates.bookingConfirmationDoctor({
+					doctorName: doctorUser.name,
+					patientName: patientUser?.name || 'Patient',
+					appointmentDate,
+					startTime,
+					endTime,
+					chiefComplaint: preVisitAI.chiefComplaint || 'General',
+					symptoms: symptoms.trim(),
+					urgencyLevel: preVisitAI.urgencyLevel,
+				});
+
 				await createAndSendNotification({
 					recipientUserId: doctorUser.id,
 					type: 'BOOKING_CONFIRMATION',
 					appointmentId: appointment.id,
 					subject: 'New Patient Appointment Booked — HealthPulse',
 					bodyText: `New consultation booked by ${patientUser?.name || 'Patient'} for ${appointmentDate} from ${startTime} to ${endTime}. Chief Complaint: ${preVisitAI.chiefComplaint || 'General'}`,
+					bodyHtml: doctorHtml,
 					eventKey: `${appointment.id}:DOCTOR_BOOKING_CONFIRMATION`,
 				});
 			}
@@ -628,6 +652,15 @@ async function cancelAppointment(req, res) {
 		}
 
 		// 1. Send cancellation email to Patient
+		const patientCancelHtml = emailTemplates.appointmentCancellation({
+			recipientName: appointment.patient?.name || 'Patient',
+			doctorName: appointment.doctorProfile?.user?.name || 'Doctor',
+			patientName: appointment.patient?.name || 'Patient',
+			appointmentDate: new Date(appointment.appointmentDate).toLocaleDateString(),
+			startTime: appointment.startTime,
+			reason: 'Patient cancellation request',
+		});
+
 		await createAndSendNotification({
 			recipientUserId: patientId,
 			type: 'APPOINTMENT_CANCELLATION',
@@ -636,11 +669,21 @@ async function cancelAppointment(req, res) {
 			bodyText: `Your appointment with Dr. ${appointment.doctorProfile?.user?.name || 'Doctor'} on ${new Date(
 				appointment.appointmentDate
 			).toLocaleDateString()} at ${appointment.startTime} has been cancelled.`,
+			bodyHtml: patientCancelHtml,
 			eventKey: `${appointment.id}:PATIENT_CANCELLATION`,
 		});
 
 		// 2. Send cancellation email to Doctor
 		if (appointment.doctorProfile?.user?.id) {
+			const doctorCancelHtml = emailTemplates.appointmentCancellation({
+				recipientName: `Dr. ${appointment.doctorProfile?.user?.name || 'Doctor'}`,
+				doctorName: appointment.doctorProfile?.user?.name || 'Doctor',
+				patientName: appointment.patient?.name || 'Patient',
+				appointmentDate: new Date(appointment.appointmentDate).toLocaleDateString(),
+				startTime: appointment.startTime,
+				reason: 'Patient cancellation request',
+			});
+
 			await createAndSendNotification({
 				recipientUserId: appointment.doctorProfile.user.id,
 				type: 'APPOINTMENT_CANCELLATION',
@@ -649,6 +692,7 @@ async function cancelAppointment(req, res) {
 				bodyText: `The appointment with ${appointment.patient?.name || 'Patient'} on ${new Date(
 					appointment.appointmentDate
 				).toLocaleDateString()} at ${appointment.startTime} has been cancelled.`,
+				bodyHtml: doctorCancelHtml,
 				eventKey: `${appointment.id}:DOCTOR_CANCELLATION`,
 			});
 		}
