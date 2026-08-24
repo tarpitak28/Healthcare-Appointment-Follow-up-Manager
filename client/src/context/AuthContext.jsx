@@ -31,11 +31,15 @@ export function AuthProvider({ children }) {
 		return res.data.user;
 	};
 
-	const register = async ({ name, email, password }) => {
+	const register = async ({ name, email, password, role, specialisation, slotDuration, workingHours }) => {
 		const res = await API.post('/auth/register', {
 			name,
 			email,
 			password,
+			role,
+			specialisation,
+			slotDuration,
+			workingHours,
 		});
 
 		localStorage.setItem('token', res.data.token);

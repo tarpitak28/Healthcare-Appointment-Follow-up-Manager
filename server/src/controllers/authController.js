@@ -15,7 +15,7 @@ function generateToken(user) {
 // Register user (Patient / Doctor / Admin)
 async function register(req, res) {
 	try {
-		const { name, email, password } = req.body;
+		const { name, email, password, role, specialisation, slotDuration, workingHours } = req.body;
 
 		if (!name || !email || !password) {
 			return res.status(400).json({
@@ -24,7 +24,14 @@ async function register(req, res) {
 			});
 		}
 
-		// Public registration is always for PATIENT accounts.
+		const targetRole = (role || 'PATIENT').toUpperCase();
+		if (!['PATIENT', 'DOCTOR', 'ADMIN'].includes(targetRole)) {
+			return res.status(400).json({
+				success: false,
+				message: 'Invalid role specified. Must be PATIENT, DOCTOR, or ADMIN.',
+			});
+		}
+
 		const existingUser = await prisma.user.findUnique({
 			where: { email },
 		});
@@ -38,20 +45,35 @@ async function register(req, res) {
 
 		const hashedPassword = await bcrypt.hash(password, 10);
 
-		const user = await prisma.user.create({
-			data: {
-				name,
-				email,
-				password: hashedPassword,
-				role: 'PATIENT',
-			},
+		const user = await prisma.$transaction(async (tx) => {
+			const newUser = await tx.user.create({
+				data: {
+					name,
+					email,
+					password: hashedPassword,
+					role: targetRole,
+				},
+			});
+
+			if (targetRole === 'DOCTOR') {
+				await tx.doctorProfile.create({
+					data: {
+						userId: newUser.id,
+						specialisation: specialisation || 'General Physician',
+						slotDuration: parseInt(slotDuration || '30', 10),
+						workingHours: workingHours || { start: '09:00', end: '17:00' },
+					},
+				});
+			}
+
+			return newUser;
 		});
 
 		const token = generateToken(user);
 
 		res.status(201).json({
 			success: true,
-			message: 'Patient registered successfully',
+			message: `${targetRole} account registered successfully`,
 			token,
 			user: {
 				id: user.id,
