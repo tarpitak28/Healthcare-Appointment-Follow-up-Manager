@@ -22,11 +22,19 @@ router.get('/auth-url', (req, res) => {
   const userId = req.query.userId || req.query.state || '';
   const returnPath = req.query.returnPath || '';
 
+  let frontendOrigin = (req.headers.origin || req.headers.referer || process.env.CLIENT_URL || 'https://careconect-alpha.vercel.app')
+    .replace(/\/$/, '');
+
+  try {
+    const parsed = new URL(frontendOrigin);
+    frontendOrigin = `${parsed.protocol}//${parsed.host}`;
+  } catch (e) {}
+
   const host = req.get('host');
   const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
   const dynamicRedirectUri = process.env.GOOGLE_REDIRECT_URI || `${protocol}://${host}/api/calendar/auth/google/callback`;
 
-  const statePayload = JSON.stringify({ userId, returnPath, redirectUri: dynamicRedirectUri });
+  const statePayload = JSON.stringify({ userId, returnPath, redirectUri: dynamicRedirectUri, frontendOrigin });
 
   const client = new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
@@ -101,6 +109,7 @@ router.get('/auth/google/callback', async (req, res) => {
     let userId = '';
     let returnPath = '';
     let usedRedirectUri = '';
+    let frontendOrigin = '';
 
     if (state) {
       try {
@@ -109,6 +118,7 @@ router.get('/auth/google/callback', async (req, res) => {
         userId = parsed.userId || '';
         returnPath = parsed.returnPath || '';
         usedRedirectUri = parsed.redirectUri || '';
+        frontendOrigin = parsed.frontendOrigin || '';
       } catch (e) {
         userId = state;
       }
@@ -146,14 +156,23 @@ router.get('/auth/google/callback', async (req, res) => {
       });
     }
 
-    const clientUrl = (process.env.CLIENT_URL || 'https://careconect-alpha.vercel.app').replace(/\/$/, '');
+    let clientUrl = frontendOrigin || process.env.CLIENT_URL || 'https://careconect-alpha.vercel.app';
+    clientUrl = clientUrl.replace(/\/$/, '');
+    if (clientUrl.includes('careconnect.vercel.app')) {
+      clientUrl = clientUrl.replace('careconnect.vercel.app', 'careconect-alpha.vercel.app');
+    }
+
     const redirectTarget = returnPath ? `${clientUrl}${returnPath}` : clientUrl;
     const finalUrl = redirectTarget.includes('?') ? `${redirectTarget}&google=connected` : `${redirectTarget}?google=connected`;
 
     res.redirect(finalUrl);
   } catch (error) {
     console.error('Error exchanging code for tokens:', error.message || error);
-    const clientUrl = (process.env.CLIENT_URL || 'https://careconect-alpha.vercel.app').replace(/\/$/, '');
+    let clientUrl = frontendOrigin || process.env.CLIENT_URL || 'https://careconect-alpha.vercel.app';
+    clientUrl = clientUrl.replace(/\/$/, '');
+    if (clientUrl.includes('careconnect.vercel.app')) {
+      clientUrl = clientUrl.replace('careconnect.vercel.app', 'careconect-alpha.vercel.app');
+    }
     res.redirect(`${clientUrl}?google=error`);
   }
 });
