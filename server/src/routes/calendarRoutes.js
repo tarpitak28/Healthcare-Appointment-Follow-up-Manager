@@ -2,6 +2,7 @@ const express = require('express');
 const { google } = require('googleapis');
 const router = express.Router();
 const prisma = require('../config/db');
+const { verifyToken } = require('../middleware/authMiddleware');
 
 // Initialize the OAuth2 client
 const oauth2Client = new google.auth.OAuth2(
@@ -22,7 +23,57 @@ router.get('/auth-url', (req, res) => {
   res.json({ url });
 });
 
-// 2. Route to handle Google's callback after the user clicks "Allow"
+// 2. Route to check Google Calendar Connection status for current user
+router.get('/status', verifyToken, async (req, res) => {
+  try {
+    const tokenRecord = await prisma.googleToken.findUnique({
+      where: { userId: req.user.id },
+    });
+
+    if (!tokenRecord) {
+      return res.status(200).json({
+        success: true,
+        connected: false,
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      connected: true,
+      expiresAt: tokenRecord.expiresAt,
+    });
+  } catch (error) {
+    console.error('Error fetching calendar status:', error);
+    res.status(500).json({
+      success: false,
+      connected: false,
+      message: 'Failed to fetch calendar status',
+    });
+  }
+});
+
+// 3. Route to disconnect Google Calendar for current user
+router.post('/disconnect', verifyToken, async (req, res) => {
+  try {
+    await prisma.googleToken.deleteMany({
+      where: { userId: req.user.id },
+    });
+
+    res.status(200).json({
+      success: true,
+      connected: false,
+      message: 'Google Calendar disconnected successfully',
+    });
+  } catch (error) {
+    console.error('Error disconnecting calendar:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to disconnect Google Calendar',
+    });
+  }
+});
+
+// 4. Route to handle Google's callback after the user clicks "Allow"
 router.get('/auth/google/callback', async (req, res) => {
   const { code, state } = req.query;
 
@@ -31,29 +82,31 @@ router.get('/auth/google/callback', async (req, res) => {
     const { tokens } = await oauth2Client.getToken(code);
     console.log('SUCCESS! Google Tokens Acquired:', tokens);
 
-    if (state && tokens.refresh_token) {
+    if (state && state.trim() !== '') {
       await prisma.googleToken.upsert({
         where: { userId: state },
         update: {
           accessToken: tokens.access_token,
-          refreshToken: tokens.refresh_token,
+          ...(tokens.refresh_token && { refreshToken: tokens.refresh_token }),
           expiresAt: new Date(tokens.expiry_date || Date.now() + 3600 * 1000),
         },
         create: {
           userId: state,
           accessToken: tokens.access_token,
-          refreshToken: tokens.refresh_token,
+          refreshToken: tokens.refresh_token || 'offline_refresh_token',
           expiresAt: new Date(tokens.expiry_date || Date.now() + 3600 * 1000),
         },
       });
     }
 
-    // Redirect the user back to the React frontend dashboard
-    res.redirect(`${process.env.CLIENT_URL || 'http://localhost:5173'}/patient?google=connected`);
+    const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+    res.redirect(`${clientUrl}?google=connected`);
   } catch (error) {
     console.error('Error exchanging code for tokens:', error);
-    res.redirect(`${process.env.CLIENT_URL || 'http://localhost:5173'}/patient?google=error`);
+    const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+    res.redirect(`${clientUrl}?google=error`);
   }
 });
 
 module.exports = router;
+
