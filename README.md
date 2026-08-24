@@ -1,42 +1,55 @@
-# Healthcare Appointment & Follow-up Manager
-
 # CareConnect — Premium Healthcare SaaS Platform
+> **Healthcare Appointment & Follow-up Manager**
+
+---
+
+## 🌐 Live Production Deployment
+
+| Service | Environment | URL | Status / Endpoint |
+| :--- | :--- | :--- | :--- |
+| **Frontend Web App** | Production (Vercel) | [https://careconect-alpha.vercel.app](https://careconect-alpha.vercel.app) | Single-Page Application (SPA) |
+| **Login Portal** | Production (Vercel) | [https://careconect-alpha.vercel.app/login](https://careconect-alpha.vercel.app/login) | Role-based Auth Portal |
+| **Backend REST API** | Production (Render) | [https://careconect-api.onrender.com](https://careconect-api.onrender.com) | Express REST API Server |
+| **API Health Check** | Production (Render) | [https://careconect-api.onrender.com/api/health](https://careconect-api.onrender.com/api/health) | `{"status":"OK"}` |
+
+---
 
 CareConnect is a modern healthcare appointment scheduling and patient management SaaS application built with a decoupled React SPA frontend and a Node.js/Express REST backend backed by PostgreSQL (Prisma ORM). It features role-based access for Patients, Doctors, and Admins, AI-driven symptom summaries, double-booking prevention, doctor leave management, medication reminder scheduling, transactional email notifications, and Google Calendar OAuth 2.0 synchronization.
 
 ---
 
 ## Table of Contents
-1. [Overview](#overview)
-2. [Features](#features)
-3. [Tech Stack](#tech-stack)
-4. [Architecture](#architecture)
-5. [Project Structure](#project-structure)
-6. [Prerequisites](#prerequisites)
-7. [Installation](#installation)
-8. [Environment Variables](#environment-variables)
-9. [.env.example](#envexample)
-10. [Database Setup](#database-setup)
-11. [Running Locally](#running-locally)
-12. [Frontend](#frontend)
-13. [Backend](#backend)
-14. [API Documentation](#api-documentation)
-15. [Authentication & Roles](#authentication--roles)
-16. [Appointment Booking Flow](#appointment-booking-flow)
-17. [Double-Booking Prevention](#double-booking-prevention)
-18. [Slot Hold Mechanism](#slot-hold-mechanism)
-19. [Doctor Leave Handling](#doctor-leave-handling)
-20. [AI / LLM Integration](#ai--llm-integration)
-21. [Pre-Visit Prompt](#pre-visit-prompt)
-22. [Post-Visit Prompt](#post-visit-prompt)
-23. [Email Notifications](#email-notifications)
-24. [Email Retry Strategy](#email-retry-strategy)
-25. [Google Calendar Integration](#google-calendar-integration)
-26. [Google OAuth 2.0 Setup](#google-oauth-2.0-setup)
-27. [Background Jobs](#background-jobs)
-28. [Medication Reminder System](#medication-reminder-system)
-29. [Testing](#testing)
-30. [Known Limitations](#known-limitations)
+1. [Live Production Deployment](#-live-production-deployment)
+2. [Overview](#overview)
+3. [Features](#features)
+4. [Tech Stack](#tech-stack)
+5. [Architecture](#architecture)
+6. [Project Structure](#project-structure)
+7. [Prerequisites](#prerequisites)
+8. [Installation](#installation)
+9. [Environment Variables](#environment-variables)
+10. [.env.example](#envexample)
+11. [Database Setup](#database-setup)
+12. [Running Locally](#running-locally)
+13. [Frontend](#frontend)
+14. [Backend](#backend)
+15. [API Documentation](#api-documentation)
+16. [Authentication & Roles](#authentication--roles)
+17. [Appointment Booking Flow](#appointment-booking-flow)
+18. [Double-Booking Prevention](#double-booking-prevention)
+19. [Slot Hold Mechanism](#slot-hold-mechanism)
+20. [Doctor Leave Handling](#doctor-leave-handling)
+21. [AI / LLM Integration](#ai--llm-integration)
+22. [Pre-Visit Prompt](#pre-visit-prompt)
+23. [Post-Visit Prompt](#post-visit-prompt)
+24. [Email Notifications](#email-notifications)
+25. [Email Retry Strategy](#email-retry-strategy)
+26. [Google Calendar Integration](#google-calendar-integration)
+27. [Google OAuth 2.0 Setup](#google-oauth-2.0-setup)
+28. [Background Jobs](#background-jobs)
+29. [Medication Reminder System](#medication-reminder-system)
+30. [Testing](#testing)
+31. [Known Limitations](#known-limitations)
 
 ---
 
@@ -54,18 +67,20 @@ CareConnect streamlines clinic operations by enabling patients to book appointme
 ---
 
 ## Tech Stack
-- **Frontend**: React 18, Vite, TailwindCSS (CareConnect Teal `#3FA3C3`), Lucide Icons, React Query (@tanstack/react-query), React Router v6.
-- **Backend**: Node.js, Express.js, PostgreSQL, Prisma ORM, Nodemailer, Google APIs (Calendar OAuth 2.0), Google Gemini AI (@google/genai).
+- **Frontend**: React 18, Vite, TailwindCSS (CareConnect Teal `#3FA3C3`), Lucide Icons, React Query (@tanstack/react-query), React Router v6. Hosted on **Vercel**.
+- **Backend**: Node.js, Express.js, PostgreSQL (Neon / Supabase), Prisma ORM, Nodemailer, Google APIs (Calendar OAuth 2.0), Google Gemini AI (@google/genai). Hosted on **Render**.
 - **Testing & Tooling**: Jest, Supertest, Nodemon, Dotenv.
 
 ---
 
 ## Architecture
 ```text
-React 18 SPA (CareConnect #3FA3C3 UI)
+React 18 SPA (Vercel: https://careconect-alpha.vercel.app)
        │
-       ▼
-Express REST API ──► PostgreSQL (Prisma ORM)
+       ▼ HTTPS REST
+Express REST API (Render: https://careconect-api.onrender.com)
+       │
+       ├──► PostgreSQL Database (Prisma ORM)
        │
        ├───────────────────┬───────────────────┐
        ▼                   ▼                   ▼
@@ -144,8 +159,8 @@ EMAIL_PASS=your_gmail_app_password
 EMAIL_FROM="CareConnect Platform" <your_email@gmail.com>
 GOOGLE_CLIENT_ID=your_google_oauth_client_id
 GOOGLE_CLIENT_SECRET=your_google_oauth_client_secret
-GOOGLE_REDIRECT_URI=http://localhost:5000/api/calendar/callback
-CLIENT_URL=http://localhost:3000
+GOOGLE_REDIRECT_URI=https://careconect-api.onrender.com/api/calendar/callback
+CLIENT_URL=https://careconect-alpha.vercel.app
 ```
 
 ---
@@ -173,17 +188,17 @@ npm run dev
 ---
 
 ## Frontend
-The React 18 SPA runs on Vite on `http://localhost:3000`. It adopts CareConnect design tokens (`#3FA3C3` primary teal, `#F7F9FA` background, `#FFFFFF` cards, Inter font).
+The React 18 SPA runs locally on Vite at `http://localhost:3000` and is deployed in production at **[https://careconect-alpha.vercel.app](https://careconect-alpha.vercel.app)** (Login portal: **[https://careconect-alpha.vercel.app/login](https://careconect-alpha.vercel.app/login)**). It adopts CareConnect design tokens (`#3FA3C3` primary teal, `#F7F9FA` background, `#FFFFFF` cards, Inter font).
 
 ---
 
 ## Backend
-The Express.js REST API runs on `http://localhost:5000` with JWT authentication, role authorization middleware, and PostgreSQL Prisma connection pooling.
+The Express.js REST API runs locally on `http://localhost:5000` and is deployed in production at **[https://careconect-api.onrender.com](https://careconect-api.onrender.com)**. It features JWT authentication, role authorization middleware, PostgreSQL Prisma connection pooling, and a health endpoint at `/api/health`.
 
 ---
 
 ## API Documentation
-See [`API_DOCUMENTATION.md`](file:///e:/Health_Appointment/API_DOCUMENTATION.md) for full REST route details.
+See [`API_DOCUMENTATION.md`](file:///e:/Health_Appointment/API_DOCUMENTATION.md) for full REST route details. Live base endpoint: `https://careconect-api.onrender.com/api`.
 
 ---
 
@@ -245,7 +260,7 @@ OAuth 2.0 integration creates, updates, and deletes Google Calendar events for p
 ---
 
 ## Google OAuth 2.0 Setup
-1. Create Google Cloud Project -> 2. Enable Google Calendar API -> 3. Configure OAuth consent screen -> 4. Create OAuth client ID -> 5. Set redirect URI to `http://localhost:5000/api/calendar/callback` -> 6. Copy Client ID and Secret to `.env`.
+1. Create Google Cloud Project -> 2. Enable Google Calendar API -> 3. Configure OAuth consent screen -> 4. Create OAuth client ID -> 5. Set redirect URI to `https://careconect-api.onrender.com/api/calendar/callback` (or `http://localhost:5000/api/calendar/callback` for local testing) -> 6. Copy Client ID and Secret to `.env`.
 
 ---
 
@@ -271,3 +286,4 @@ Executes Jest test suite covering concurrency protection, doctor leave cascades,
 ## Known Limitations
 - Google Calendar live synchronization requires user OAuth authorization consent.
 - Email delivery requires valid SMTP credentials configured in `.env`.
+

@@ -59,6 +59,13 @@ describe('Admin Doctor Leave Range & Cancellation Test Suite', () => {
     });
   });
 
+  beforeEach(async () => {
+    if (doctorProfile?.id) {
+      await prisma.appointment.deleteMany({ where: { doctorProfileId: doctorProfile.id } });
+      await prisma.doctorLeave.deleteMany({ where: { doctorProfileId: doctorProfile.id } });
+    }
+  });
+
   test('Multi-Day Leave Range: Submitting leave from 2026-12-10 to 2026-12-12 auto-cancels booking on middle day 2026-12-11', async () => {
     const midDate = new Date('2026-12-11');
 
