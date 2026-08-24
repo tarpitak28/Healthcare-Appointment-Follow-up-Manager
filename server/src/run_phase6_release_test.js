@@ -190,7 +190,7 @@ async function runPhase6ReleaseAudit() {
       const req = http.request({
         hostname: 'localhost',
         port: TEST_PORT,
-        path: '/api/admin/doctor-leave',
+        path: `/api/admin/doctors/${doctorProfile.id}/leave`,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
