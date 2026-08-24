@@ -82,7 +82,7 @@ A comprehensive healthcare appointment platform with role-based access control f
 
 4. **Run Prisma Migrations & Client Generation:**
    ```bash
-   npx prisma db push
+   npx prisma migrate deploy
    npx prisma generate
    ```
 
