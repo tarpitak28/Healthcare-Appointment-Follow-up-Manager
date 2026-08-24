@@ -1,12 +1,64 @@
 const prisma = require('./config/db');
 const bcrypt = require('bcryptjs');
 
-async function seedDemoUsers() {
+async function seedRealUsers() {
   try {
     const hashedPassword = await bcrypt.hash('password123', 10);
 
-    // 1. Patient User
-    const patient = await prisma.user.upsert({
+    // 1. Real Patient Account
+    const realPatient = await prisma.user.upsert({
+      where: { email: 'ktarpita@gmail.com' },
+      update: { password: hashedPassword, role: 'PATIENT', name: 'Tarpita K' },
+      create: {
+        name: 'Tarpita K',
+        email: 'ktarpita@gmail.com',
+        password: hashedPassword,
+        role: 'PATIENT',
+      },
+    });
+
+    // 2. Real Doctor Account (Dr. Pranjal Karan)
+    const realDoctorUser = await prisma.user.upsert({
+      where: { email: 'pranjalkaran2004@gmail.com' },
+      update: { password: hashedPassword, role: 'DOCTOR', name: 'Dr. Pranjal Karan' },
+      create: {
+        name: 'Dr. Pranjal Karan',
+        email: 'pranjalkaran2004@gmail.com',
+        password: hashedPassword,
+        role: 'DOCTOR',
+      },
+    });
+
+    // Doctor Profile for Dr. Pranjal Karan
+    await prisma.doctorProfile.upsert({
+      where: { userId: realDoctorUser.id },
+      update: {
+        specialisation: 'General Cardiology',
+        slotDuration: 30,
+        workingHours: { start: '09:00', end: '17:00' },
+      },
+      create: {
+        userId: realDoctorUser.id,
+        specialisation: 'General Cardiology',
+        slotDuration: 30,
+        workingHours: { start: '09:00', end: '17:00' },
+      },
+    });
+
+    // 3. Real Admin Account
+    const realAdmin = await prisma.user.upsert({
+      where: { email: 'admin@healthpulse.app' },
+      update: { password: hashedPassword, role: 'ADMIN', name: 'HealthPulse Chief Admin' },
+      create: {
+        name: 'HealthPulse Chief Admin',
+        email: 'admin@healthpulse.app',
+        password: hashedPassword,
+        role: 'ADMIN',
+      },
+    });
+
+    // 4. Demo Backup Patient
+    await prisma.user.upsert({
       where: { email: 'patient@example.com' },
       update: { password: hashedPassword, role: 'PATIENT' },
       create: {
@@ -17,8 +69,8 @@ async function seedDemoUsers() {
       },
     });
 
-    // 2. Doctor User
-    const doctorUser = await prisma.user.upsert({
+    // 5. Demo Backup Doctor
+    const demoDoctor = await prisma.user.upsert({
       where: { email: 'doctor@example.com' },
       update: { password: hashedPassword, role: 'DOCTOR' },
       create: {
@@ -29,43 +81,33 @@ async function seedDemoUsers() {
       },
     });
 
-    // Doctor Profile
     await prisma.doctorProfile.upsert({
-      where: { userId: doctorUser.id },
+      where: { userId: demoDoctor.id },
       update: {
-        specialisation: 'General Cardiology',
+        specialisation: 'General Physician',
         slotDuration: 30,
         workingHours: { start: '09:00', end: '17:00' },
       },
       create: {
-        userId: doctorUser.id,
-        specialisation: 'General Cardiology',
+        userId: demoDoctor.id,
+        specialisation: 'General Physician',
         slotDuration: 30,
         workingHours: { start: '09:00', end: '17:00' },
       },
     });
 
-    // 3. Admin User
-    const admin = await prisma.user.upsert({
-      where: { email: 'admin@example.com' },
-      update: { password: hashedPassword, role: 'ADMIN' },
-      create: {
-        name: 'System Admin',
-        email: 'admin@example.com',
-        password: hashedPassword,
-        role: 'ADMIN',
-      },
-    });
-
-    console.log('SUCCESS: Demo users seeded in database.');
-    console.log('Patient:', patient.email);
-    console.log('Doctor:', doctorUser.email);
-    console.log('Admin:', admin.email);
+    console.log('SUCCESS: Real accounts and profiles seeded in database.');
+    console.log('----------------------------------------------------');
+    console.log('Real Patient:', realPatient.email);
+    console.log('Real Doctor :', realDoctorUser.email);
+    console.log('Real Admin  :', realAdmin.email);
+    console.log('Password for all:', 'password123');
+    console.log('----------------------------------------------------');
   } catch (err) {
-    console.error('Error seeding demo users:', err);
+    console.error('Error seeding real users:', err);
   } finally {
     await prisma.$disconnect();
   }
 }
 
-seedDemoUsers();
+seedRealUsers();
