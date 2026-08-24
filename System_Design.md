@@ -1,62 +1,66 @@
-# CareConnect — Healthcare System Architecture & Design
+# System Design — Healthcare Appointment & Follow-up Manager
 
-## 1. System Overview & Architecture
+## 1. Double-Booking Prevention
 
-CareConnect is a healthcare appointment and patient management SaaS platform engineered with a decoupled React SPA frontend and a Node.js/Express REST backend backed by a PostgreSQL database managed via Prisma ORM.
+CareConnect enforces strict concurrency protection to prevent double-booking identical doctor slots under high concurrent request volumes. The primary defense layer utilizes a PostgreSQL partial unique index on the `Appointment` table:
 
-```text
-React 18 SPA (Teal #3FA3C3 UI) ──► Express REST API ──► PostgreSQL (Prisma ORM)
-                                           │
-                        ┌──────────────────┼──────────────────┐
-                        ▼                  ▼                  ▼
-               Notification Service  Gemini AI API    Google Calendar API
+```sql
+CREATE UNIQUE INDEX unique_active_doctor_slot
+ON "Appointment" ("doctorProfileId", "appointmentDate", "startTime")
+WHERE status IN ('BOOKED', 'COMPLETED');
 ```
 
----
+When concurrent booking requests arrive at the exact same millisecond for an available doctor slot, PostgreSQL enforces row-level exclusivity at the storage engine layer. One transaction succeeds (`HTTP 201 Created`), while concurrent transactions trigger a database constraint violation. The backend catches Prisma error `P2002` and converts it into a structured `HTTP 409 Conflict` response with message `"This slot has already been booked by another patient"`.
 
-## 2. Double-Booking Prevention & Concurrency Protection
-
-CareConnect defends against simultaneous booking race conditions (`Patient A` and `Patient B` requesting the exact same slot at `10:00 AM`) through a multi-layered concurrency defense:
-
-1. **Database-Level Partial Unique Index**:
-   A PostgreSQL partial unique index (`unique_active_doctor_slot`) is defined on `(doctorProfileId, appointmentDate, startTime)` where `status != 'CANCELLED'`.
-2. **Atomic Transaction Isolation**:
-   Booking creation requests run inside `prisma.$transaction`. If two concurrent requests arrive simultaneously, PostgreSQL enforces row serialization; exactly one transaction succeeds (`HTTP 201 Created`), while the second encounters a unique key collision (`P2002`) and returns `HTTP 409 Conflict`.
+The partial index filter `WHERE status IN ('BOOKED', 'COMPLETED')` ensures cancelled appointments (`status = 'CANCELLED'`) do not occupy unique index keys. This design permits patients to immediately re-book previously cancelled slots while retaining complete historical cancellation audit records in the database.
 
 ---
 
-## 3. Short-Lived Slot Hold Mechanism
+## 2. Doctor Leave Conflict Handling
 
-CareConnect implements an ephemeral 5-minute slot hold reservation system during patient slot selection:
+Doctor leave management resolves schedule overlaps when an administrator marks a doctor as unavailable across a multi-day date range (`startDate` to `endDate`).
 
-- **State Management**: When a patient clicks a slot, a 300-second timer (`isHoldActive`) initializes in component state while registering a hold in the backend (`SlotHold` memory map).
-- **Expiration & Abandonment**: Held slots display an active timer (`✓ Slot reserved for you — 04:37`). If unconfirmed after 300 seconds or abandoned, the hold automatically expires, reverting the slot to available status.
+Upon receiving a leave submission, the backend validates that `endDate` is on or after `startDate`. Within an atomic database transaction, the system queries all active appointments (`status = 'BOOKED'`) for that doctor falling within `[startDate, endDate]`. For every matching appointment:
 
----
+1. The status is updated to `CANCELLED`.
+2. Associated Google Calendar events are deleted via Google API.
+3. An idempotent `NotificationLog` entry (`type = DOCTOR_LEAVE_CANCELLATION`) is generated for each affected patient.
+4. Transactional emails containing the leave reason and cancellation notice are dispatched via Nodemailer.
 
-## 4. Doctor Leave Conflict Handling
-
-When an Admin enforces doctor leave across a date range (`startDate` to `endDate`):
-
-1. **Conflict Discovery**: The system queries all active bookings for that doctor profile overlapping the leave interval.
-2. **Automated Cancellation**: Affected appointments are transitioned to `CANCELLED` status with the reason `Doctor On Leave`.
-3. **Patient Notifications**: `NotificationService` dispatches individual `DOCTOR_LEAVE_CANCELLATION` email alerts to affected patients.
-4. **Availability Restriction**: Slot queries for dates within the leave interval return `isOnLeave: true`, disabling new booking attempts.
+Subsequent slot queries for the leave period dynamically exclude all dates within the active leave range, blocking new booking attempts.
 
 ---
 
-## 5. Notification Service & Asynchronous Reliability
+## 3. Slot Hold Mechanism
 
-CareConnect handles email delivery failures gracefully without failing critical booking transactions:
+To protect patients from race conditions while completing pre-visit symptom questionnaires, CareConnect implements an ephemeral slot reservation system using the `SlotHold` model:
 
-- **Decoupled Outbox Design**: Booking creation commits the appointment to PostgreSQL regardless of SMTP status.
-- **Idempotent Audit Log**: Every notification records a unique `eventKey` (`appointmentId:EVENT_TYPE`) in `NotificationLog`.
-- **Bounded Exponential Backoff**: Email delivery retries follow a schedule (1m → 5m → 15m → 60m, capped at 5 attempts). If SMTP is down, the booking remains valid while the cron worker retries notification dispatches asynchronously.
-- **Recipient Isolation**: Notifications send individual emails (`to: user.email`) without shared `CC`/`BCC` fields.
+```prisma
+model SlotHold {
+  id              String        @id @default(uuid())
+  doctorProfileId String
+  patientId       String
+  appointmentDate DateTime      @db.Date
+  startTime       String
+  expiresAt       DateTime
+  @@unique([doctorProfileId, appointmentDate, startTime])
+}
+```
+
+When a patient selects a 30-minute slot, the system creates a 5-minute hold with `expiresAt = NOW() + 5 minutes`. The `@@unique` constraint prevents concurrent users from holding the same slot simultaneously. Available slot calculations query active holds and filter out any slot where `expiresAt > NOW()`.
+
+When the patient confirms the booking, the hold is deleted within the appointment creation transaction. Unconfirmed holds automatically expire after 300 seconds and are cleaned up by periodic background tasks.
 
 ---
 
-## 6. AI Grounding & Google Calendar Resilience
+## 4. Notification Failure Handling
 
-- **AI Zero-Hallucination Guardrails**: Clinical summaries generated via Gemini AI are validated against raw symptoms. Discovered unstated medications or prompt injection attempts flag `needsHumanReview = true` for doctor inspection without breaking consultation submission.
-- **Google Calendar Isolation**: Calendar API sync errors are logged without rolling back appointment records in PostgreSQL.
+Transactional email reliability is achieved through an asynchronous, idempotent notification engine using the `NotificationLog` table.
+
+Every notification event generates a unique `eventKey` (e.g., `booking_confirm_<appointmentId>_<userId>`). The unique constraint on `eventKey` guarantees idempotency, preventing duplicate email dispatches during network retries or concurrent triggers.
+
+When an email fails (e.g., SMTP timeout or rate limit), the service catches the error, increments `attempts`, sets `status = PENDING`, and calculates the next retry timestamp using bounded exponential backoff:
+
+$$\text{Delay} = \min(60, 2^{\text{attempts}}) \text{ minutes}$$
+
+A background cron task (`node-cron`) polls for due notifications (`status = PENDING` AND `nextAttemptAt <= NOW()`) every 60 seconds. Notifications encountering 5 consecutive failures transition to `status = FAILED` to avoid infinite retry loops.
