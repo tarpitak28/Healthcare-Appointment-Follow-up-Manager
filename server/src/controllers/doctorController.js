@@ -39,7 +39,7 @@ async function getDoctorAppointments(req, res) {
 async function submitPostVisitNotes(req, res) {
 	try {
 		const { appointmentId } = req.params;
-		const { clinicalNotes, prescription } = req.body; // prescription: object or array of meds
+		const { clinicalNotes, prescription } = req.body;
 		const userId = req.user.id;
 
 		if (!clinicalNotes) {
@@ -48,6 +48,7 @@ async function submitPostVisitNotes(req, res) {
 
 		const doctorProfile = await prisma.doctorProfile.findUnique({
 			where: { userId },
+			include: { user: true },
 		});
 
 		if (!doctorProfile) {
@@ -63,8 +64,16 @@ async function submitPostVisitNotes(req, res) {
 			return res.status(404).json({ success: false, message: 'Appointment not found or unauthorized' });
 		}
 
-		// Generate AI Post-Visit Summary with zero-hallucination guardrail
-		const summaryData = await generatePostVisitSummary(clinicalNotes, prescription);
+		// Generate AI Post-Visit Summary with strict 4s timeout guarantee
+		const summaryPromise = generatePostVisitSummary(clinicalNotes, prescription);
+		const timeoutPromise = new Promise((resolve) =>
+			setTimeout(() => {
+				const { getPostVisitFallback } = require('../utils/postVisitGuardrail');
+				resolve(getPostVisitFallback(clinicalNotes));
+			}, 4000)
+		);
+
+		const summaryData = await Promise.race([summaryPromise, timeoutPromise]);
 		const needsHumanReview = typeof summaryData === 'object' && summaryData !== null ? Boolean(summaryData.needsHumanReview) : false;
 		const reviewReasons = typeof summaryData === 'object' && summaryData !== null ? (summaryData.reviewReasons || []) : [];
 
@@ -84,28 +93,24 @@ async function submitPostVisitNotes(req, res) {
 			},
 		});
 
-		// Dispatch post-visit notification via NotificationService (failure does not break completion)
-		try {
-			await createAndSendNotification({
-				recipientUserId: appointment.patientId,
-				type: 'POST_VISIT_SUMMARY',
-				appointmentId: appointment.id,
-				subject: 'Your Post-Visit Summary is Ready',
-				bodyText: `Dr. ${doctorProfile.user?.name || 'your doctor'} has completed your consultation. Please sign in to your patient portal to review your post-visit summary and prescription details.`,
-				eventKey: `${appointment.id}:POST_VISIT_SUMMARY`,
-			});
-		} catch (notifErr) {
-			// Soft failure
-		}
+		// Dispatch post-visit notification asynchronously (non-blocking)
+		createAndSendNotification({
+			recipientUserId: appointment.patientId,
+			type: 'POST_VISIT_SUMMARY',
+			appointmentId: appointment.id,
+			subject: 'Your Post-Visit Summary is Ready',
+			bodyText: `Dr. ${doctorProfile.user?.name || 'your doctor'} has completed your consultation. Please sign in to your patient portal to review your post-visit summary and prescription details.`,
+			eventKey: `${appointment.id}:POST_VISIT_SUMMARY`,
+		}).catch((notifErr) => console.error('[Notification] Non-blocking post-visit notification error:', notifErr.message));
 
-		res.status(200).json({
+		return res.status(200).json({
 			success: true,
 			message: 'Post-visit notes submitted and summary generated successfully',
 			appointment: updatedAppointment,
 		});
 	} catch (error) {
 		console.error('Submit post-visit error:', error);
-		res.status(500).json({ success: false, message: 'Server error submitting post-visit notes' });
+		return res.status(500).json({ success: false, message: 'Server error submitting post-visit notes' });
 	}
 }
 
