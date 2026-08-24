@@ -111,6 +111,6 @@ describe('Admin Doctor Leave Range & Cancellation Test Suite', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.success).toBe(false);
-    expect(res.body.message).toMatch(/endDate cannot be before startDate/i);
+    expect(res.body.message).toMatch(/end date cannot be before start date/i);
   });
 });

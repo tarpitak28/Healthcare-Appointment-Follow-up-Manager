@@ -1,5 +1,5 @@
 const prisma = require('../config/db');
-const { sendEmail } = require('../utils/emailService');
+const emailService = require('../utils/emailService');
 
 // Calculate bounded exponential backoff retry time
 function calculateNextRetryTime(attemptCount) {
@@ -95,7 +95,7 @@ async function createAndSendNotification({
     // 3. Attempt immediate Nodemailer dispatch wrapped in soft try/catch
     const startTime = Date.now();
     try {
-      const sent = await sendEmail({
+      const sent = await emailService.sendEmail({
         to: recipient.email,
         subject,
         text: bodyText,
@@ -202,7 +202,7 @@ async function processNotificationRetries() {
       }
 
       try {
-        const sent = await sendEmail({
+        const sent = await emailService.sendEmail({
           to: recipient.email,
           subject: log.subject,
           text: log.bodyText || '',

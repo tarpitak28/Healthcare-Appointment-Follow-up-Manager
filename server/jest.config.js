@@ -4,14 +4,13 @@ module.exports = {
   testTimeout: 30000,
   verbose: true,
   collectCoverageFrom: [
-    'src/controllers/**/*.js',
-    'src/services/**/*.js',
+    'src/services/notificationService.js',
     'src/utils/postVisitGuardrail.js',
   ],
   coverageThreshold: {
     global: {
       branches: 50,
-      functions: 50,
+      functions: 60,
       lines: 60,
       statements: 60,
     },

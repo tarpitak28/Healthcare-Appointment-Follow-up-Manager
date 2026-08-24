@@ -57,8 +57,7 @@ describe('Notification Reliability, Retries & Idempotency Test Suite', () => {
 
   test('Forced Failure & Backoff Schedule: Failed email delivery sets nextAttemptAt in future and processNotificationRetries filters on nextAttemptAt <= NOW', async () => {
     // 1. Mock sendEmail to fail with SMTP error
-    const origSendEmail = emailService.sendEmail;
-    emailService.sendEmail = jest.fn().mockResolvedValue(false);
+    const sendEmailSpy = jest.spyOn(emailService, 'sendEmail').mockImplementation(async () => false);
 
     const eventKey = `test_forced_failure_${Date.now()}:BOOKING_CONFIRMATION`;
 
@@ -96,7 +95,7 @@ describe('Notification Reliability, Retries & Idempotency Test Suite', () => {
     expect(new Date(state2.nextAttemptAt).getTime()).toBeGreaterThan(Date.now());
 
     // Restore original sendEmail and cleanup
-    emailService.sendEmail = origSendEmail;
+    sendEmailSpy.mockRestore();
     await prisma.notificationLog.deleteMany({ where: { id: notif1.id } });
   });
 
@@ -117,8 +116,7 @@ describe('Notification Reliability, Retries & Idempotency Test Suite', () => {
     });
 
     // Mock sendEmail to fail on attempt 5
-    const origSendEmail = emailService.sendEmail;
-    emailService.sendEmail = jest.fn().mockResolvedValue(false);
+    const sendEmailSpy = jest.spyOn(emailService, 'sendEmail').mockImplementation(async () => false);
 
     await processNotificationRetries();
 
@@ -127,7 +125,7 @@ describe('Notification Reliability, Retries & Idempotency Test Suite', () => {
     expect(finalState.attempts).toBe(5);
 
     // Restore sendEmail and cleanup
-    emailService.sendEmail = origSendEmail;
+    sendEmailSpy.mockRestore();
     await prisma.notificationLog.deleteMany({ where: { id: notif.id } });
   });
 });
