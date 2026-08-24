@@ -219,28 +219,34 @@ async function googleCallback(req, res) {
   try {
     const { code, state } = req.query;
 
+    if (!code) {
+      return res.redirect(`${process.env.CLIENT_URL || 'http://localhost:5173'}/patient?google=failed`);
+    }
+
     const oauth2Client = createOAuthClient();
     const { tokens } = await oauth2Client.getToken(code);
 
-    await prisma.googleToken.upsert({
-      where: { userId: state },
-      update: {
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token,
-        expiresAt: new Date(tokens.expiry_date),
-      },
-      create: {
-        userId: state,
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token,
-        expiresAt: new Date(tokens.expiry_date),
-      },
-    });
+    if (state && state.trim() !== '') {
+      await prisma.googleToken.upsert({
+        where: { userId: state },
+        update: {
+          accessToken: tokens.access_token,
+          ...(tokens.refresh_token && { refreshToken: tokens.refresh_token }),
+          expiresAt: new Date(tokens.expiry_date || Date.now() + 3600 * 1000),
+        },
+        create: {
+          userId: state,
+          accessToken: tokens.access_token,
+          refreshToken: tokens.refresh_token || 'offline_refresh_token',
+          expiresAt: new Date(tokens.expiry_date || Date.now() + 3600 * 1000),
+        },
+      });
+    }
 
-    res.redirect(`${process.env.CLIENT_URL}/patient?google=connected`);
+    res.redirect(`${process.env.CLIENT_URL || 'http://localhost:5173'}/patient?google=connected`);
   } catch (err) {
-    console.error(err);
-    res.redirect(`${process.env.CLIENT_URL}/patient?google=failed`);
+    console.error('[Google OAuth Error]:', err.message);
+    res.redirect(`${process.env.CLIENT_URL || 'http://localhost:5173'}/patient?google=failed`);
   }
 }
 

@@ -25,13 +25,13 @@ export default function PatientDashboard() {
 
   const handleConnectCalendar = async () => {
     try {
-      const res = await API.get('/calendar/auth-url');
+      const res = await API.get(`/calendar/auth-url?userId=${user?.id || ''}`);
       if (res.data && res.data.url) {
         window.location.href = res.data.url;
       }
     } catch (error) {
       console.error('Failed to initiate Google OAuth', error);
-      alert('Google Calendar OAuth is not configured or failed to generate URL.');
+      alert('Google Calendar OAuth URL generation failed. Please verify server configuration.');
     }
   };
 
@@ -70,6 +70,14 @@ export default function PatientDashboard() {
     fetchDoctors();
     fetchAppointments();
     fetchMedicationReminders();
+
+    const searchParams = new URLSearchParams(window.location.search);
+    const googleStatus = searchParams.get('google');
+    if (googleStatus === 'connected') {
+      setMessage('✅ Google Calendar connected successfully! Your appointments will sync automatically.');
+    } else if (googleStatus === 'failed' || googleStatus === 'error') {
+      setMessage('ℹ️ Note: Automated background Google Calendar OAuth sync requires production GOOGLE_CLIENT_ID & GOOGLE_CLIENT_SECRET in server/.env. You can use the "📅 Add to Google Calendar" button or "📥 Download .ics Invite" button on any booked appointment below!');
+    }
   }, []);
 
   const fetchMedicationReminders = async () => {
