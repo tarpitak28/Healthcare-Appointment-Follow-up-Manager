@@ -1,137 +1,196 @@
-# HealthPulse — Transactional Email & Notification Architecture Specification
+# HealthPulse — Detailed Transactional Email & Notification Architecture
 
-This document outlines the transactional email architecture, error classification, Dead-Letter Queue (DLQ), idempotency guarantees, and background retry worker implemented in the **HealthPulse** application.
+This document provides an exhaustive specification of the HealthPulse transactional email architecture, end-to-end event flows across Admin, Doctor, and Patient personas, error classification, retry mechanics, template registries, and AI safety guardrails.
 
 ---
 
-## 1. Architectural Overview & Design Principles
+## 1. Architectural Overview & Separation of Concerns
+
+The transactional email subsystem is designed as an **asynchronous notification engine** decoupled from core business transactions. Database operations (booking, cancellation, leave enforcement) commit atomically first and return HTTP responses immediately without waiting for external email network calls.
 
 ```text
-       ┌─────────────────────────────────────────────────────────────────┐
-       │                     REST API Controllers                        │
-       │ (Appointment, Auth, Admin, Doctor, Clinical, Leave Controllers) │
-       └────────────────────────────────┬────────────────────────────────┘
-                                        │
-                                        ▼
-       ┌─────────────────────────────────────────────────────────────────┐
-       │             Notification Service (Idempotency Engine)           │
-       │    - Checks eventKey uniqueness in NotificationLog Table       │
-       │    - Creates PENDING record with nextAttemptAt = NOW()         │
-       └────────────────────────────────┬────────────────────────────────┘
-                                        │
-                                        ▼
-       ┌─────────────────────────────────────────────────────────────────┐
-       │               Nodemailer Pooled SMTP Transport                  │
-       │       (Gmail App Passwords / Standard SMTP Connection Pool)     │
-       └──────────────────┬─────────────────────────────┬────────────────┘
-                          │                             │
-               (SMTP 250 Success)             (SMTP 4xx / 5xx Failure)
-                          │                             │
-                          ▼                             ▼
-                ┌──────────────────┐          ┌──────────────────┐
-                │ Mark status=SENT │          │ Error Classifier │
-                └──────────────────┘          └─────────┬────────┘
-                                                        │
-                         ┌──────────────────────────────┴──────────────────────────────┐
-                         │                                                             │
-                         ▼                                                             ▼
-           (SMTP 5xx / Auth / Format Error)                               (SMTP 4xx / Network Timeout)
-                         │                                                             │
-                         ▼                                                             ▼
-         ┌────────────────────────────────┐                            ┌────────────────────────────────┐
-         │     Dead-Letter Queue (DLQ)    │                            │    Scheduled Retry Queue       │
-         │  - status = 'dead'             │                            │  - status = 'failed'           │
-         │  - nextAttemptAt = null        │                            │  - nextAttemptAt = NOW + 2^N m │
-         └────────────────────────────────┘                            └───────────────┬────────────────┘
-                                                                                       │
-                                                                                       ▼
-                                                                      ┌────────────────────────────────┐
-                                                                      │   Background Cron Worker (1m)  │
-                                                                      │   (processNotificationRetries) │
-                                                                      └────────────────────────────────┘
+Business Operation
+       │
+       ▼
+Database Transaction (Prisma / PostgreSQL)
+       │
+       ├── SUCCESS → HTTP Response (201 Created / 200 OK)
+       │
+       ▼
+Notification Event (createAndSendNotification)
+       │
+       ▼
+NotificationLog (eventKey Idempotency Lock)
+       │
+       ▼
+Nodemailer Pooled SMTP Transport (Gmail / Custom Host)
+       │
+ ┌─────┴──────┐
+ ▼            ▼
+SUCCESS      FAILURE
+ │            │
+ ▼            ▼
+SENT       Classify Error
+              │
+       ┌──────┴──────┐
+       ▼             ▼
+   Permanent      Transient
+  (SMTP 5xx)     (SMTP 4xx / Timeout)
+       │             │
+       ▼             ▼
+      DEAD         FAILED
+ (DLQ: No Retry)     │
+                     ▼
+                 Cron Worker (every 1 min)
+                     │
+                     ▼
+             SENT / FAILED / DEAD
 ```
 
 ---
 
-## 2. Core Implementation Files
+## 2. Personas & Email Flow Matrix
 
-| Layer / Service | File Path | Responsibilities |
-| :--- | :--- | :--- |
-| **Nodemailer SMTP Transporter** | [`server/src/utils/emailService.js`](file:///e:/Health_Appointment/server/src/utils/emailService.js) | Pooled SMTP transport creation, socket timeout bounds, and live message dispatching. |
-| **Notification Idempotency Engine** | [`server/src/services/notificationService.js`](file:///e:/Health_Appointment/server/src/services/notificationService.js) | Idempotent `eventKey` registration, database logging, error classification, and bounded retries. |
-| **Background Cron Retry Worker** | [`server/src/services/cronService.js`](file:///e:/Health_Appointment/server/src/services/cronService.js) | Executes every minute (`* * * * *`) calling `processNotificationRetries()`. |
-| **Database Schema** | `NotificationLog` in Prisma ORM | Stores log records tracking `recipientUserId`, `type`, `eventKey`, `status`, `attempts`, `nextAttemptAt`, `lastError`. |
-
----
-
-## 3. Idempotency & Database Log Schema (`NotificationLog`)
-
-To prevent duplicate email dispatches during concurrent request execution or server retries, every notification is tagged with a unique `eventKey`:
-
-- **Booking Confirmation (Patient)**: `<appointmentId>:PATIENT_CONFIRMATION`
-- **Booking Confirmation (Doctor)**: `<appointmentId>:DOCTOR_CONFIRMATION`
-- **Appointment Cancellation**: `<appointmentId>:PATIENT_CANCELLATION`
-- **Doctor Leave Alert**: `<appointmentId>:DOCTOR_LEAVE_CANCELLATION`
-- **Medication Reminder**: `<reminderId>:<date>:<time>:MEDICATION_REMINDER`
-
-If a duplicate dispatch request arrives with an existing `eventKey`, the idempotency engine catches the Prisma `P2002` unique constraint violation and skips duplicate dispatching.
+| Persona | Email Purpose | Event Key Format | Template Key |
+| :--- | :--- | :--- | :--- |
+| **Patient** | Booking Confirmation | `<appointmentId>:PATIENT_CONFIRMATION` | `bookingConfirmation` |
+| **Doctor** | Booking Notification | `<appointmentId>:DOCTOR_CONFIRMATION` | `bookingConfirmation` |
+| **Patient** | Appointment Cancellation | `<appointmentId>:PATIENT_CANCELLATION` | `appointmentCancellation` |
+| **Doctor** | Appointment Cancellation | `<appointmentId>:DOCTOR_CANCELLATION` | `appointmentCancellation` |
+| **Patient** | Doctor Leave Conflict Alert | `<appointmentId>:DOCTOR_LEAVE_CANCELLATION` | `doctorLeaveConflict` |
+| **Patient** | 24-Hour & 1-Hour Reminder | `<appointmentId>:24H_REMINDER` | `appointmentReminder` |
+| **Patient** | AI Post-Visit Care Summary | `<appointmentId>:POST_VISIT_SUMMARY` | `clinicalSummary` |
+| **Patient** | Daily Medication Reminder | `<reminderId>:<date>:<time>:MEDICATION_REMINDER` | `medicationReminder` |
+| **Doctor** | Password Reset OTP | `<userId>:<timestamp>:DOCTOR_OTP` | `doctorOtpDelivery` |
 
 ---
 
-## 4. SMTP Error Classification & Retry Mechanics
+## 3. Database Schema (`NotificationLog`)
 
-When an email dispatch fails, Nodemailer error responses are classified into two distinct failure categories:
+Implemented in PostgreSQL via Prisma ORM:
 
-### A. Permanent Unrecoverable Failures (Dead-Letter Queue / `dead`)
-- **Triggers**:
-  - `SMTP 5xx` Hard Bounces (`550 User Unknown`, `553 Invalid mailbox`)
-  - `SMTP 535` Authentication Errors (`Authentication credentials invalid`)
-  - Malformed email address or envelope format errors
-- **System Action**:
-  - Sets `status = 'dead'` (or `'FAILED'` after 5 attempts).
-  - Sets `nextAttemptAt = null`.
-  - Halts further automated retries to protect SMTP domain reputation.
+```prisma
+enum NotificationStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+  DEAD
+}
 
-### B. Transient Recoverable Failures (`failed`)
-- **Triggers**:
-  - `SMTP 4xx` Soft Bounces (`421 Service Unavailable`, `450 Mailbox Busy`, `451 Local Error`)
-  - Network Socket Errors (`ETIMEDOUT`, `ECONNRESET`, `ENOTFOUND`, `ENETUNREACH`)
-- **System Action**:
-  - Sets `status = 'failed'` (or `'PENDING'`).
-  - Increments `attempts = attempts + 1`.
-  - Calculates `nextAttemptAt` using bounded exponential backoff.
+model NotificationLog {
+  id              String             @id @default(uuid())
+  recipientUserId String?
+  appointmentId   String?
+  type            String
+  eventKey        String             @unique
+  subject         String
+  bodyText        String
+  bodyHtml        String?
+  status          NotificationStatus @default(PENDING)
+  attempts        Int                @default(0)
+  nextAttemptAt   DateTime?
+  lastAttemptAt   DateTime?
+  sentAt          DateTime?
+  failedAt        DateTime?
+  lastError       String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
 
-### Exponential Backoff Schedule Formula
+  recipient       User?              @relation(fields: [recipientUserId], references: [id])
+  appointment     Appointment?        @relation(fields: [appointmentId], references: [id])
+
+  @@index([status, nextAttemptAt])
+  @@index([appointmentId])
+}
+```
+
+---
+
+## 4. SMTP Error Classification & Dead-Letter Queue (DLQ)
+
+Outbound Nodemailer exceptions are evaluated to determine retryability:
+
+### A. Permanent Unrecoverable Errors (DLQ / `dead`)
+- **Triggers**: SMTP 5xx Hard Bounces (`550 User Unknown`, `553 Invalid address`), SMTP 535 Auth Errors, malformed envelope data.
+- **Action**: Sets `status = 'dead'`, `nextAttemptAt = null`. Stops retries to protect domain reputation.
+
+### B. Transient Recoverable Errors (`failed`)
+- **Triggers**: SMTP 4xx Soft Bounces (`421 Host Busy`, `450 Mailbox Locked`, `451 Local Error`), Socket Timeouts (`ETIMEDOUT`, `ECONNRESET`, `ENOTFOUND`).
+- **Action**: Sets `status = 'failed'`, increments `attempts`, and calculates `nextAttemptAt` using bounded exponential backoff:
+
 $$\text{nextAttemptAt} = \text{NOW}() + \text{DelayMinutes}[\min(\text{attempts}, 4)]$$
-- **Attempt 1**: +1 minute
-- **Attempt 2**: +5 minutes
-- **Attempt 3**: +15 minutes
-- **Attempt 4**: +60 minutes
-- **Attempt 5**: Final transition to `FAILED` / `dead` (max 5 attempts bounded).
+- **Attempt 1**: +1 minute | **Attempt 2**: +5 minutes | **Attempt 3**: +15 minutes | **Attempt 4**: +60 minutes
+- **Attempt 5+**: Transition to `dead` (DLQ).
 
 ---
 
-## 5. Live Gmail SMTP Configuration (`.env`)
+## 5. AI Safety & Clinical Summary Human Review Pipeline
 
-The project is currently configured with live Gmail SMTP using App Passwords:
+When an AI post-visit care plan is generated, it passes through an automated zero-hallucination source grounding engine (`validateSourceGrounding`).
 
-```env
-ENABLE_EMAIL_NOTIFICATIONS=true
-EMAIL_TEST_MODE=false
-EMAIL_TEST_RECIPIENT=pranjalkaran2004@gmail.com
+```text
+Doctor Clinical Notes
+         │
+         ▼
+Gemini 2.0 Flash (Temperature 0.2)
+         │
+         ▼
+Zod Schema Validation (PostVisitSummarySchema)
+         │
+         ▼
+Source Grounding Engine (validateSourceGrounding)
+         │
+  ┌──────┴─────────────────────────────────┐
+  ▼                                        ▼
+Passes Grounding Check                 Grounding Check Fails
+  │                                        │
+  ▼                                        ▼
+needsHumanReview = false                needsHumanReview = true
+  │                                        │
+  ▼                                        ▼
+Notification Service Dispatches          Hold Dispatch (Doctor Dashboard
+Clinical Summary Email                   Review Modal Required)
+```
 
-EMAIL_HOST=smtp.gmail.com
-EMAIL_PORT=587
-EMAIL_SECURE=false
-EMAIL_USER=ktarpita@gmail.com
-EMAIL_PASS=nbygfhrdisyvzvgs
-EMAIL_FROM="HealthPulse Hospital <support@healthpulse.app>"
-SUPPORT_EMAIL=support@healthpulse.com
+If `needsHumanReview = true`, the system suppresses automatic email dispatch to the patient until the doctor manually reviews and approves the care summary on their dashboard.
 
-SMTP_POOL=true
-SMTP_MAX_CONNECTIONS=5
-SMTP_MAX_MESSAGES=100
-SMTP_CONNECTION_TIMEOUT=10000
-SMTP_GREETING_TIMEOUT=10000
-SMTP_SOCKET_TIMEOUT=15000
+---
+
+## 6. Pooled Nodemailer Transport Setup (`emailService.js`)
+
+```javascript
+const nodemailer = require('nodemailer');
+
+const transporter = nodemailer.createTransport({
+  host: process.env.EMAIL_HOST || 'smtp.gmail.com',
+  port: parseInt(process.env.EMAIL_PORT || '587', 10),
+  secure: process.env.EMAIL_SECURE === 'true',
+  pool: true, // Persistent TCP Connection Pooling
+  maxConnections: 5,
+  maxMessages: 100,
+  connectionTimeout: 10000,
+  greetingTimeout: 10000,
+  socketTimeout: 15000,
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+```
+
+---
+
+## 7. Master Event Registry (`notificationService.js`)
+
+All notification dispatches are routed through a master event registry ensuring strict DTO sanitization and preventing sensitive field exposure (passwords, JWTs, OAuth tokens):
+
+```javascript
+const notificationRegistry = {
+  BOOKING_CONFIRMATION: { retryable: true, priority: 'HIGH' },
+  APPOINTMENT_CANCELLATION: { retryable: true, priority: 'CRITICAL' },
+  DOCTOR_LEAVE_CANCELLATION: { retryable: true, priority: 'CRITICAL' },
+  POST_VISIT_SUMMARY: { retryable: true, priority: 'NORMAL' },
+  MEDICATION_REMINDER: { retryable: true, priority: 'NORMAL' },
+};
 ```
