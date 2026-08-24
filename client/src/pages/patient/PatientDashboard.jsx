@@ -228,14 +228,13 @@ export default function PatientDashboard() {
             <h1 className="text-2xl font-bold text-slate-800">Welcome, {user?.name} (Patient)</h1>
             <p className="text-sm text-slate-600">Search doctors, check live slots, and book consultations.</p>
           </div>
-          <div className="flex space-x-2">
-            <button
-              onClick={() =>
-                window.location.href = `http://localhost:5000/api/auth/google?token=${localStorage.getItem("token")}`
-              }
-              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium"
+          <div className="flex gap-3">
+            <button 
+              type="button" 
+              onClick={handleConnectCalendar} 
+              className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 flex items-center gap-1.5"
             >
-              Connect Google Calendar
+              <span>📅</span> Connect Google Calendar
             </button>
             <button onClick={() => setIsEditing(!isEditing)} className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-lg font-medium hover:bg-indigo-100">
               {isEditing ? 'Cancel Edit' : 'Edit Profile'}

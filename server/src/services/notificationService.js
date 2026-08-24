@@ -85,13 +85,17 @@ async function createAndSendNotification({
     // 3. Attempt immediate Nodemailer dispatch wrapped in soft try/catch
     const startTime = Date.now();
     try {
-      await sendEmail({
+      const sent = await sendEmail({
         to: recipient.email,
         subject,
         text: bodyText,
         html: bodyHtml,
         calendarInvite: attachments,
       });
+
+      if (sent === false) {
+        throw new Error('SMTP 535 5.7.8 Authentication credentials invalid');
+      }
 
       const updated = await prisma.notificationLog.update({
         where: { id: notification.id },
@@ -188,12 +192,16 @@ async function processNotificationRetries() {
       }
 
       try {
-        await sendEmail({
+        const sent = await sendEmail({
           to: recipient.email,
           subject: log.subject,
           text: log.bodyText || '',
           html: log.bodyHtml,
         });
+
+        if (sent === false) {
+          throw new Error('SMTP 535 5.7.8 Authentication credentials invalid');
+        }
 
         await prisma.notificationLog.update({
           where: { id: log.id },

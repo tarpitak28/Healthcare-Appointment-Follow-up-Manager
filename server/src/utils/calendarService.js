@@ -1,6 +1,8 @@
 function generateIcsFile({ title, description, startTime, endTime, date, location }) {
-  const startDateTime = new Date(`${date.toISOString().split('T')[0]}T${startTime}:00`).toISOString().replace(/-|:|\.\d\d\d/g, '');
-  const endDateTime = new Date(`${date.toISOString().split('T')[0]}T${endTime}:00`).toISOString().replace(/-|:|\.\d\d\d/g, '');
+  const dateObj = date instanceof Date ? date : new Date(date || Date.now());
+  const dateStr = dateObj.toISOString().split('T')[0];
+  const startDateTime = new Date(`${dateStr}T${startTime}:00`).toISOString().replace(/-|:|\.\d\d\d/g, '');
+  const endDateTime = new Date(`${dateStr}T${endTime}:00`).toISOString().replace(/-|:|\.\d\d\d/g, '');
 
   return `BEGIN:VCALENDAR
 VERSION:2.0
