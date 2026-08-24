@@ -152,8 +152,8 @@ npm run test:coverage
 Detailed architectural and integration specifications are located in the `docs/` folder:
 
 1. 🏛️ **[System Design Document](file:///e:/Health_Appointment/SYSTEM_DESIGN.md)** (`SYSTEM_DESIGN.md` — 546 words): Concise breakdown of double-booking prevention, doctor leave handling, slot holds, and notification retry mechanics.
-2. 🔌 **[REST API Reference](file:///e:/Health_Appointment/docs/API.md)** (`docs/API.md`): Endpoint specifications, request/response JSON schemas, and HTTP status codes.
-3. 🗄️ **[Database Schema Reference](file:///e:/Health_Appointment/docs/DATABASE.md)** (`docs/DATABASE.md`): ER diagram, model descriptions, and PostgreSQL partial unique index callout (`unique_active_doctor_slot`).
+2. 🔌 **[REST API Reference](file:///e:/Health_Appointment/docs/API_DOCUMENTATION.md)** (`docs/API_DOCUMENTATION.md`): Endpoint specifications, request/response JSON schemas, and HTTP status codes.
+3. 🗄️ **[Database Schema Reference](file:///e:/Health_Appointment/docs/DATABASE_SCHEMA.md)** (`docs/DATABASE_SCHEMA.md`): ER diagram, model descriptions, and PostgreSQL partial unique index callout (`unique_active_doctor_slot`).
 4. 🤖 **[LLM Prompts & Guardrails](file:///e:/Health_Appointment/docs/LLM_PROMPTS.md)** (`docs/LLM_PROMPTS.md`): Verbatim pre/post-visit prompts, Zod schemas, source-grounding rules, and fallback behavior.
 5. 📅 **[Google Calendar Setup Guide](file:///e:/Health_Appointment/docs/GOOGLE_CALENDAR_SETUP.md)** (`docs/GOOGLE_CALENDAR_SETUP.md`): Step-by-step Google Cloud OAuth 2.0 configuration guide.
 
@@ -167,8 +167,8 @@ Detailed architectural and integration specifications are located in the `docs/`
 - [x] `.env` excluded (no hardcoded secrets committed)
 - [x] `.env.example` provided with complete environment placeholders
 - [x] Comprehensive `README.md` included
-- [x] REST API reference documented ([`docs/API.md`](file:///e:/Health_Appointment/docs/API.md))
-- [x] Database schema documented ([`docs/DATABASE.md`](file:///e:/Health_Appointment/docs/DATABASE.md))
+- [x] REST API reference documented ([`docs/API_DOCUMENTATION.md`](file:///e:/Health_Appointment/docs/API_DOCUMENTATION.md))
+- [x] Database schema documented ([`docs/DATABASE_SCHEMA.md`](file:///e:/Health_Appointment/docs/DATABASE_SCHEMA.md))
 - [x] LLM prompts and guardrails documented ([`docs/LLM_PROMPTS.md`](file:///e:/Health_Appointment/docs/LLM_PROMPTS.md))
 - [x] Google Calendar setup documented ([`docs/GOOGLE_CALENDAR_SETUP.md`](file:///e:/Health_Appointment/docs/GOOGLE_CALENDAR_SETUP.md))
 - [x] System design write-up ≤800 words included ([`SYSTEM_DESIGN.md`](file:///e:/Health_Appointment/SYSTEM_DESIGN.md))
