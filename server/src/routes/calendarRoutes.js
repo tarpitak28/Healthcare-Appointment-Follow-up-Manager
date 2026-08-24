@@ -21,9 +21,20 @@ const oauth2Client = new google.auth.OAuth2(
 router.get('/auth-url', (req, res) => {
   const userId = req.query.userId || req.query.state || '';
   const returnPath = req.query.returnPath || '';
-  const statePayload = JSON.stringify({ userId, returnPath });
 
-  const url = oauth2Client.generateAuthUrl({
+  const host = req.get('host');
+  const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+  const dynamicRedirectUri = process.env.GOOGLE_REDIRECT_URI || `${protocol}://${host}/api/calendar/auth/google/callback`;
+
+  const statePayload = JSON.stringify({ userId, returnPath, redirectUri: dynamicRedirectUri });
+
+  const client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    dynamicRedirectUri
+  );
+
+  const url = client.generateAuthUrl({
     access_type: 'offline', // Required to get a refresh token
     prompt: 'consent',      // Forces the consent screen every time
     scope: ['https://www.googleapis.com/auth/calendar', 'https://www.googleapis.com/auth/calendar.events'],
@@ -89,6 +100,7 @@ router.get('/auth/google/callback', async (req, res) => {
   try {
     let userId = '';
     let returnPath = '';
+    let usedRedirectUri = '';
 
     if (state) {
       try {
@@ -96,13 +108,25 @@ router.get('/auth/google/callback', async (req, res) => {
         const parsed = JSON.parse(decodedStr);
         userId = parsed.userId || '';
         returnPath = parsed.returnPath || '';
+        usedRedirectUri = parsed.redirectUri || '';
       } catch (e) {
         userId = state;
       }
     }
 
+    const host = req.get('host');
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+    const fallbackRedirectUri = process.env.GOOGLE_REDIRECT_URI || `${protocol}://${host}/api/calendar/auth/google/callback`;
+    const targetRedirectUri = usedRedirectUri || fallbackRedirectUri;
+
+    const client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      targetRedirectUri
+    );
+
     // Swap the code for actual tokens
-    const { tokens } = await oauth2Client.getToken(code);
+    const { tokens } = await client.getToken(code);
     console.log('SUCCESS! Google Tokens Acquired for user:', userId);
 
     if (userId && userId.trim() !== '') {
@@ -122,14 +146,14 @@ router.get('/auth/google/callback', async (req, res) => {
       });
     }
 
-    const clientUrl = (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/$/, '');
+    const clientUrl = (process.env.CLIENT_URL || 'https://careconect-alpha.vercel.app').replace(/\/$/, '');
     const redirectTarget = returnPath ? `${clientUrl}${returnPath}` : clientUrl;
     const finalUrl = redirectTarget.includes('?') ? `${redirectTarget}&google=connected` : `${redirectTarget}?google=connected`;
 
     res.redirect(finalUrl);
   } catch (error) {
-    console.error('Error exchanging code for tokens:', error);
-    const clientUrl = (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/$/, '');
+    console.error('Error exchanging code for tokens:', error.message || error);
+    const clientUrl = (process.env.CLIENT_URL || 'https://careconect-alpha.vercel.app').replace(/\/$/, '');
     res.redirect(`${clientUrl}?google=error`);
   }
 });
