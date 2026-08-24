@@ -7,6 +7,7 @@ const {
   getProfile,
   updateProfile,
   resetPassword,
+  deleteAccount,
   googleLogin,
   googleCallback
 } = require('../controllers/authController');
@@ -19,6 +20,7 @@ router.post('/reset-password', resetPassword);
 
 router.get('/me', verifyToken, getProfile);
 router.put('/me', verifyToken, updateProfile);
+router.delete('/me', verifyToken, deleteAccount);
 
 // NEW
 router.get('/google', googleLogin);

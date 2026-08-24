@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import API from '../../api/axios';
 import { useAuth } from '../../context/AuthContext';
 import PatientLayout from './PatientLayout';
@@ -14,14 +15,35 @@ import Button from '../../components/ui/Button';
 import {
   Calendar,
   ChevronRight,
+  Trash2,
+  AlertTriangle,
 } from 'lucide-react';
 
 export default function PatientDashboard() {
-  const { user } = useAuth();
+  const { user, deleteAccount } = useAuth();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [appointmentFilter, setAppointmentFilter] = useState('ALL');
   const [message, setMessage] = useState('');
   const queryClient = useQueryClient();
+
+  const handleDeleteAccount = async () => {
+    const confirmDelete = window.confirm(
+      '⚠️ ARE YOU SURE YOU WANT TO DELETE YOUR PROFILE?\n\n' +
+      'Deleting your profile will PERMANENTLY remove your account, appointment history, medical reminders, and synced calendar data from the database.\n\n' +
+      'This action CANNOT be undone!'
+    );
+
+    if (!confirmDelete) return;
+
+    try {
+      await deleteAccount();
+      alert('Your profile and all associated data have been permanently deleted.');
+      navigate('/login');
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to delete profile.');
+    }
+  };
 
   // Profile Edit State
   const [name, setName] = useState(user?.name || '');
@@ -404,6 +426,27 @@ export default function PatientDashboard() {
               Save Profile Changes
             </Button>
           </form>
+
+          {/* Danger Zone: Delete Profile & All Associated Data */}
+          <div className="pt-4 border-t border-[#E5E7EB]">
+            <div className="p-4 bg-red-50 border border-red-200 rounded-2xl space-y-3">
+              <div className="flex items-center space-x-2 text-red-800 font-bold text-xs">
+                <AlertTriangle className="w-4 h-4 text-red-600" />
+                <span>Danger Zone</span>
+              </div>
+              <p className="text-[11px] text-red-700 leading-relaxed font-medium">
+                Permanently delete your account profile, appointment history, medical prescriptions, and synced calendar tokens from the database.
+              </p>
+              <button
+                type="button"
+                onClick={handleDeleteAccount}
+                className="w-full py-2.5 px-4 bg-red-600 hover:bg-red-700 active:scale-98 text-white font-bold text-xs rounded-xl transition shadow-xs flex items-center justify-center space-x-2 min-h-[44px]"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Delete Profile & All Associated Data</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </PatientLayout>

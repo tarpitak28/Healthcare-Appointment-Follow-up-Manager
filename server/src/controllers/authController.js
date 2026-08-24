@@ -328,12 +328,64 @@ async function resetPassword(req, res) {
 	}
 }
 
+// Delete user account and all associated data
+async function deleteAccount(req, res) {
+	try {
+		const userId = req.user.id;
+
+		await prisma.$transaction(async (tx) => {
+			// 1. Find if doctor profile exists
+			const doctorProf = await tx.doctorProfile.findUnique({
+				where: { userId },
+			});
+
+			// 2. Delete medication reminders connected to patient appointments
+			await tx.medicationReminder.deleteMany({
+				where: {
+					OR: [
+						{ patientId: userId },
+						{ appointment: { patientId: userId } },
+						...(doctorProf ? [{ appointment: { doctorProfileId: doctorProf.id } }] : []),
+					],
+				},
+			});
+
+			// 3. Delete appointments associated with patientId or doctorProfileId
+			await tx.appointment.deleteMany({
+				where: {
+					OR: [
+						{ patientId: userId },
+						...(doctorProf ? [{ doctorProfileId: doctorProf.id }] : []),
+					],
+				},
+			});
+
+			// 4. Delete user record (cascades to DoctorProfile, GoogleToken, SlotHold, NotificationLog, BroadcastRecipient)
+			await tx.user.delete({
+				where: { id: userId },
+			});
+		});
+
+		res.status(200).json({
+			success: true,
+			message: 'Your account and all associated data have been permanently deleted.',
+		});
+	} catch (error) {
+		console.error('Delete account error:', error);
+		res.status(500).json({
+			success: false,
+			message: 'Server error while deleting account data',
+		});
+	}
+}
+
 module.exports = {
   register,
   login,
   getProfile,
   updateProfile,
   resetPassword,
+  deleteAccount,
   googleLogin,
   googleCallback,
 };

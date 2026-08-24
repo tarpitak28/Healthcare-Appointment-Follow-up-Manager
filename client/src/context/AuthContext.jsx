@@ -53,13 +53,20 @@ export function AuthProvider({ children }) {
 		return res.data;
 	};
 
+	const deleteAccount = async () => {
+		const res = await API.delete('/auth/me');
+		localStorage.removeItem('token');
+		setUser(null);
+		return res.data;
+	};
+
 	const logout = () => {
 		localStorage.removeItem('token');
 		setUser(null);
 	};
 
 	return (
-		<AuthContext.Provider value={{ user, login, register, resetPassword, logout, loading }}>
+		<AuthContext.Provider value={{ user, login, register, resetPassword, deleteAccount, logout, loading }}>
 			{children}
 		</AuthContext.Provider>
 	);
